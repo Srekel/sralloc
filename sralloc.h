@@ -1,5 +1,6 @@
 #ifndef SR_ALLOC_TYPES
-typedef int srint_t;
+typedef int   srint_t;
+typedef short srshort_t;
 #endif
 
 typedef struct {
@@ -54,7 +55,7 @@ sralloc_malloc_deallocate( srallocator_t* allocator, void* ptr ) {
 }
 
 srallocator_t*
-sralloc_create_malloc( const char* name, void* ) {
+sralloc_create_malloc( const char* name ) {
     srallocator_t* allocator = SRALLOC_MALLOC( sizeof( srallocator_t ) );
     SRALLOC_MEMSET( allocator, 0, sizeof( srallocator_t ) );
     allocator->name              = name;
@@ -72,28 +73,56 @@ sralloc_destroy_malloc( srallocator_t* allocator ) {
     SRALLOC_FREE( allocator );
 };
 
-///////////////////////////////////////
-// SLOT
+//////////////////////////////////////
+// ███████╗██╗      ██████╗ ████████╗
+// ██╔════╝██║     ██╔═══██╗╚══██╔══╝
+// ███████╗██║     ██║   ██║   ██║
+// ╚════██║██║     ██║   ██║   ██║
+// ███████║███████╗╚██████╔╝   ██║
+// ╚══════╝╚══════╝ ╚═════╝    ╚═╝
+
 typedef struct {
-    void*   slots;
-    srint_t num_slots;
-    srint_t slot_size;
+    void*     slots;
+    srshort_t num_slots;
+    srshort_t capacity;
+    srshort_t slot_size;
+    srshort_t free_slot;
+    bool      allow_grow;
 } srallocator_slot_t;
 
 void*
 sralloc_slot_allocate( srallocator_t* allocator, srint_t size ) {
-    srallocator_slot_t* slot_a = (srallocator_slot_t*)( allocator + 1 );
+    srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+    srshort_t           slot           = slot_allocator->free_slot;
+    if ( slot_allocator->free_slot != 0 ) {
+        srshort_t next_slot_offset = slot * slot_allocator->slot_size;
+        char*     next_free_slot   = (char*)slot_allocator->slots + next_slot_offset;
+        slot_allocator->free_slot  = *(srshort_t*)next_free_slot;
+    }
+    else {
+        SRALLOC_assert( slot_allocator->num_slots < slot_allocator->capacity );
+        slot = slot_allocator->num_slots++;
+    }
+
     allocator->stats.amount_allocated += size;
     allocator->stats.num_allocations++;
-    srint_t* ptr = (srint_t*)slot( size + sizeof( srint_t ) );
-    *ptr         = size;
-    return (void*)( ptr + 1 );
+
+    srshort_t slot_offset = slot * slot_allocator->slot_size;
+    char*     slot        = (char*)slot_allocator->slots + next_slot_offset;
+    void*     ptr         = (void*)slot;
+    return ptr;
 }
 
 void
 sralloc_slot_deallocate( srallocator_t* allocator, void* ptr ) {
-    srint_t* slot_ptr = (srint_t*)ptr;
-    slot_ptr--;
+    srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+    srint_t*            slot_ptr       = (srint_t*)ptr;
+    if (slot_allocator->free_slot == 0) {
+    slot_allocator->free_slot = (slot_ptr - slot_allocator->slots;
+
+    }
+
+        slot_ptr--;
     allocator->stats.amount_allocated -= *slot_ptr;
     allocator->stats.num_allocations--;
     return free( slot_ptr );
@@ -103,9 +132,10 @@ srallocator_t*
 sralloc_create_slot( srallocator_t* parent,
                      const char*    name,
                      srint_t        slot_size,
-                     srint_t        num_slots ) {
+                     srint_t        capacity ) {
+
     srint_t allocator_size =
-      sizeof( srallocator_t ) + sizeof( srallocator_slot_t ) + slot_size * num_slots;
+      sizeof( srallocator_t ) + sizeof( srallocator_slot_t ) + slot_size * capacity;
     srallocator_t*      allocator      = parent->allocate( parent, allocator_size );
     srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
 
@@ -114,7 +144,8 @@ sralloc_create_slot( srallocator_t* parent,
     allocator->parent         = parent;
     allocator->allocate       = sralloc_slot_allocate;
     allocator->deallocate     = sralloc_slot_deallocate;
-    slot_allocator->num_slots = num_slots;
+    slot_allocator->num_slots = 0;
+    slot_allocator->capacity  = capacity;
     slot_allocator->slot_size = slot_size;
     slot_allocator->slots     = (void*)slot_allocator + 1;
     return allocator;
