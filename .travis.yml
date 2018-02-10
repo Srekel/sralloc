@@ -6,7 +6,7 @@ compiler:
   - clang
   - gcc
 
-  os:
+os:
   - linux
   - osx
 
