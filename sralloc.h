@@ -297,7 +297,7 @@ sralloc_malloc_deallocate( srallocator_t* allocator, void* ptr ) {
 
 SRALLOC_API srallocator_t*
             sralloc_create_malloc_allocator( const char* name ) {
-    srallocator_t* allocator = SRALLOC_malloc( sizeof( srallocator_t ) );
+    srallocator_t* allocator = (srallocator_t*)SRALLOC_malloc( sizeof( srallocator_t ) );
     SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
     allocator->name            = name;
     allocator->allocate_func   = sralloc_malloc_allocate;
