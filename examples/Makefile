@@ -1,10 +1,11 @@
 # INCLUDES = -I..
 
-COMPILEFLAGS = -Werror -Wall -Wextra -Wpedantic
+CFLAGS = -Werror -Wall -Wextra -Wpedantic -std=c99
+CPPFLAGS = -Werror -Wall -Wextra -Wpedantic
 
-clang_c:
-	$(CC) $(COMPILEFLAGS) unittest/unittest.c
-clang_cpp:
-	$(CXX) $(COMPILEFLAGS) unittest/unittest.c
+build_c:
+	$(CC) $(CFLAGS) unittest/unittest.c
+build_cpp:
+	$(CXX) $(CPPFLAGS) unittest/unittest.c
 
-all: clang_c clang_cpp
+all: build_c build_cpp
