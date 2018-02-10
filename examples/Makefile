@@ -1,7 +1,7 @@
 # INCLUDES = -I..
 
 CFLAGS = -Werror -Wall -Wextra -Wpedantic -std=c99
-CPPFLAGS = -Werror -Wall -Wextra -Wpedantic
+CPPFLAGS = -Werror -Wall -Wextra -Wpedantic -std=c99
 
 build_c:
 	$(CC) $(CFLAGS) unittest/unittest.c

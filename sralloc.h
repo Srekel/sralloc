@@ -17,6 +17,9 @@
 
 #ifdef __GNUC__
 #pragma GCC diagnostic ignored "-Wunused-value"
+
+// invalid conversion from ‘void*’ to ‘srallocator_t** {aka srallocator**}’
+// #pragma GCC diagnostic ignored "-Wpermissive"
 #endif
 #endif // SRALLOC_ENABLE_WARNINGS
 
@@ -158,7 +161,7 @@ sralloc_add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
         SRALLOC_memcpy(
           new_children, parent->children, parent->num_children * sizeof( parent->children ) );
         sralloc_dealloc( parent->parent, parent->children );
-        parent->children                         = new_children;
+        parent->children                         = (srallocator_t**)new_children;
         parent->children[parent->num_children++] = child;
     }
     else {
@@ -167,7 +170,7 @@ sralloc_add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
         SRALLOC_memcpy(
           new_children, parent->children, parent->num_children * sizeof( parent->children ) );
         sralloc_dealloc( parent, parent->children );
-        parent->children                         = new_children;
+        parent->children                         = (srallocator_t**)new_children;
         parent->children[parent->num_children++] = child;
     }
 }
@@ -429,7 +432,7 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     sralloc_remove_child_allocator( allocator->parent, allocator );
 
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
-	SRALLOC_UNUSED(stack_allocator);
+    SRALLOC_UNUSED( stack_allocator );
     SRALLOC_assert( stack_allocator->num_states == 0 );
     SRALLOC_assert( allocator->num_children == 0 );
     sralloc_dealloc( allocator->parent, allocator );
