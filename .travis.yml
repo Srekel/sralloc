@@ -11,5 +11,5 @@ os:
   - osx
 
 script:
-  - cd tests
+  - cd examples
   - make all
