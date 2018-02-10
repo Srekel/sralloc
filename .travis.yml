@@ -1,0 +1,15 @@
+language: cpp
+
+install: true
+
+compiler:
+  - clang
+  - gcc
+
+  os:
+  - linux
+  - osx
+
+script:
+  - cd tests
+  - make all
