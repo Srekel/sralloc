@@ -1,16 +1,23 @@
 // #include <stdafx.h>
 
 #define SRALLOC_IMPLEMENTATION
-#pragma warning( suppress : 4464 )
+#ifdef _MSC_VER
+#pragma warning( disable : 4464 )
+#endif
 #include "../../sralloc.h"
 
+#ifdef _MSC_VER
 #pragma warning( push )
 #pragma warning( disable : 4777 4710 )
 
 #pragma warning( push )
 #pragma warning( disable : 4464 4820 )
+#endif
+
 #include "../external/minctest/minctest.h"
+#ifdef _MSC_VER
 #pragma warning( pop )
+#endif
 
 void
 generic_allocator_tests( srallocator_t* allocator ) {
@@ -59,4 +66,6 @@ main( void ) {
     return lfails != 0;
 }
 
+#ifdef _MSC_VER
 #pragma warning( pop )
+#endif

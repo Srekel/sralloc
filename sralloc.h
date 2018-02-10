@@ -5,11 +5,18 @@
 #ifndef SRALLOC_ENABLE_WARNINGS
 #ifdef _MSC_VER
 #pragma warning( push )
-#pragma warning( disable : 4820 4548 )
+#pragma warning( disable : 4820 4548 4711 )
 #endif
 
 #ifdef __clang__
 #pragma clang diagnostic push
+
+// SRALLOC_UNUSED( allocator, align );
+// #pragma clang diagnostic ignored "-Werror=unused-value"
+#endif
+
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wunused-value"
 #endif
 #endif // SRALLOC_ENABLE_WARNINGS
 
@@ -293,7 +300,7 @@ SRALLOC_API srallocator_t*
     allocator->allocate_func   = sralloc_malloc_allocate;
     allocator->deallocate_func = sralloc_malloc_deallocate;
     return allocator;
-};
+}
 
 SRALLOC_API void
 sralloc_destroy_malloc_allocator( srallocator_t* allocator ) {
@@ -303,7 +310,7 @@ sralloc_destroy_malloc_allocator( srallocator_t* allocator ) {
     SRALLOC_assert( allocator->stats.amount_allocated == 0 );
 #endif
     SRALLOC_free( allocator );
-};
+}
 
 // ███████╗████████╗ █████╗  ██████╗██╗  ██╗
 // ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
@@ -372,8 +379,9 @@ sralloc_stack_allocator_clear( srallocator_t* allocator ) {
 SRALLOC_API void
 sralloc_stack_allocator_push_state( srallocator_t* allocator ) {
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
-    SRALLOC_assert( stack_allocator->num_states <
-                    ( sizeof( stack_allocator->states ) / sizeof( srallocator_stack_state_t ) ) );
+    SRALLOC_assert(
+      stack_allocator->num_states <
+      ( srint_t )( sizeof( stack_allocator->states ) / sizeof( srallocator_stack_state_t ) ) );
     srallocator_stack_state_t* state = &stack_allocator->states[stack_allocator->num_states++];
     state->top                       = stack_allocator->top;
 #ifdef SRALLOC_USE_STATS
@@ -410,7 +418,7 @@ SRALLOC_API srallocator_t*
     stack_allocator->end        = ( (char*)stack_allocator->top ) + capacity;
     stack_allocator->num_states = 0;
     return allocator;
-};
+}
 
 SRALLOC_API void
 sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
@@ -421,10 +429,11 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     sralloc_remove_child_allocator( allocator->parent, allocator );
 
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
+	SRALLOC_UNUSED(stack_allocator);
     SRALLOC_assert( stack_allocator->num_states == 0 );
     SRALLOC_assert( allocator->num_children == 0 );
     sralloc_dealloc( allocator->parent, allocator );
-};
+}
 
     // ███████╗██╗      ██████╗ ████████╗
     // ██╔════╝██║     ██╔═══██╗╚══██╔══╝

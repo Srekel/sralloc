@@ -1,6 +1,10 @@
-INCLUDES = -I..
+# INCLUDES = -I..
 
-all:
-	$(CC) $(INCLUDES) unittest/unittest.c -lm
+COMPILEFLAGS = -Werror -Wall -Wextra -Wpedantic
 
-# $(CC) $(INCLUDES) $(CPPFLAGS) test_cpp_compilation.cpp -lm -lstdc++
+clang_c:
+	$(CC) $(COMPILEFLAGS) unittest/unittest.c
+clang_cpp:
+	$(CXX) $(COMPILEFLAGS) unittest/unittest.c
+
+all: clang_c clang_cpp
