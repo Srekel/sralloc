@@ -25,10 +25,11 @@ extern "C" {
 typedef struct srallocator srallocator_t;
 
 #ifndef SRALLOC_TYPES
-// #include <stdint.h>
-typedef int   srint_t;
-typedef short srshort_t;
-// typedef uintptr_t          srptr_t;
+#include <stdint.h>
+typedef char      srchar_t;
+typedef int       srint_t;
+typedef short     srshort_t;
+typedef uintptr_t srintptr_t;
 #endif
 
 typedef struct {
@@ -69,16 +70,21 @@ SRALLOC_API srallocator_t* sralloc_create_slot_allocator( srallocator_t* parent,
 SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* allocator );
 
 // Util API. BYTES and DEALLOC only here for consistency.
+#ifndef SRALLOC_ALIGNOF
+#define SRALLOC_ALIGNOF alignof
+#endif
+
 #define SRALLOC_BYTES( allocator, size ) sralloc_alloc( allocator, size )
 #define SRALLOC_OBJECT( allocator, type ) ( (type*)sralloc_alloc( allocator, sizeof( size ) ) )
 #define SRALLOC_ARRAY( allocator, type, length ) \
     ( (type*)sralloc_alloc( allocator, sizeof( size ) * length ) );
 
-#define SRALLOC_ALIGNED_BYTES( allocator, size ) sralloc_alloc_aligned( allocator, size )
+#define SRALLOC_ALIGNED_BYTES( allocator, size, align ) \
+    sralloc_alloc_aligned( allocator, size, align )
 #define SRALLOC_ALIGNED_OBJECT( allocator, type ) \
-    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ) ) )
+    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ), SRALLOC_ALIGNOF( type ) ) )
 #define SRALLOC_ALIGNED_ARRAY( allocator, type, length ) \
-    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ) * length ) );
+    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ) * length ), SRALLOC_ALIGNOF( type ) );
 
 #define SRALLOC_DEALLOC( allocator, ptr ) sralloc_alloc(allocator, sizeof(size) * length));
 
@@ -282,15 +288,31 @@ sralloc_dealloc( srallocator_t* allocator, void* ptr ) {
 
 static allocation_result_t
 sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
-    SRALLOC_UNUSED( allocator, align );
+    size += align;
+    SRALLOC_UNUSED( allocator );
 #ifdef SRALLOC_USE_STATS
     allocator->stats.amount_allocated += size;
     allocator->stats.num_allocations++;
 #endif
-    srint_t* ptr = (srint_t*)SRALLOC_malloc( size + sizeof( srint_t ) );
-    *ptr         = size;
+    srint_t   metadata_size = sizeof( srint_t ) + sizeof( srint_t );
+    srchar_t* unaligned_ptr = SRALLOC_malloc( size + metadata_size + align );
+    if ( unaligned_ptr == SRALLOC_NULL ) {
+        allocation_result_t res = { SRALLOC_NULL, 0 };
+        return res;
+    }
+
+    // | unaligned_ptr | size | offset | ptr |
+    // srint_t to_ptr =
+    //   align == 0 ? sizeof( srint_t ) * 2 : align - ( ( (srintptr_t)unaligned_ptr ) % align );
+    srchar_t* ptr_after_alignment = unaligned_ptr + metadata_size + align;
+    srint_t   alignment_padding   = align == 0 ? 0 : ( (srintptr_t)ptr_after_alignment % align );
+    srchar_t* ptr                 = ptr_after_alignment - alignment_padding;
+    srint_t*  offset_ptr          = ( (srint_t*)ptr ) - 1;
+    srint_t*  size_ptr            = offset_ptr - 1;
+    *offset_ptr                   = ( srint_t )( ptr - unaligned_ptr );
+    *size_ptr                     = size;
     allocation_result_t res;
-    res.ptr  = (void*)( ptr + 1 );
+    res.ptr  = (void*)ptr;
     res.size = size;
     return res;
 }
@@ -298,16 +320,19 @@ sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align )
 static void
 sralloc_malloc_deallocate( srallocator_t* allocator, void* ptr ) {
     SRALLOC_UNUSED( allocator );
-    int* malloc_ptr = (srint_t*)ptr;
-    int* size_ptr   = malloc_ptr - 1;
-    int  size       = *size_ptr;
+    srint_t*  malloc_ptr    = (srint_t*)ptr;
+    srint_t*  offset_ptr    = malloc_ptr - 1;
+    srint_t*  size_ptr      = offset_ptr - 1;
+    srint_t   offset        = *offset_ptr;
+    srint_t   size          = *size_ptr;
+    srchar_t* unaligned_ptr = (srchar_t*)ptr - offset;
 #ifdef SRALLOC_USE_STATS
     allocator->stats.amount_allocated -= size;
     allocator->stats.num_allocations--;
 #else
     SRALLOC_UNUSED( size );
 #endif
-    SRALLOC_free( size_ptr );
+    SRALLOC_free( unaligned_ptr );
 }
 
 SRALLOC_API srallocator_t*
