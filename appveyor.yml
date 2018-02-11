@@ -23,16 +23,12 @@ build:
   parallel: true
   project: examples/sralloc.sln
 
-# scripts to run after build
-# after_build:
-
 #---------------------------------#
 #       tests configuration       #
 #---------------------------------#
 
-# to run your custom scripts instead of automatic tests
 test_script:
-  - examples\build\%PLATFORM%_%CONFIGURATION%\unittest.exe
+  - '%APPVEYOR_BUILD_FOLDER%\examples\build\%PLATFORM%_%CONFIGURATION%\unittest.exe'
 
 # to disable automatic tests
 #test: off

@@ -10,16 +10,11 @@
 
 #ifdef __clang__
 #pragma clang diagnostic push
-
-// SRALLOC_UNUSED( allocator, align );
-// #pragma clang diagnostic ignored "-Werror=unused-value"
 #endif
 
 #ifdef __GNUC__
+#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-value"
-
-// invalid conversion from ‘void*’ to ‘srallocator_t** {aka srallocator**}’
-// #pragma GCC diagnostic ignored "-Wpermissive"
 #endif
 #endif // SRALLOC_ENABLE_WARNINGS
 
@@ -30,9 +25,10 @@ extern "C" {
 typedef struct srallocator srallocator_t;
 
 #ifndef SRALLOC_TYPES
-typedef int                srint_t;
-typedef short              srshort_t;
-typedef unsigned long long srptr_t; // TODO fix
+// #include <stdint.h>
+typedef int   srint_t;
+typedef short srshort_t;
+// typedef uintptr_t          srptr_t;
 #endif
 
 typedef struct {
@@ -72,6 +68,25 @@ SRALLOC_API srallocator_t* sralloc_create_slot_allocator( srallocator_t* parent,
                                                           srint_t        capacity );
 SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* allocator );
 
+// Util API. BYTES and DEALLOC only here for consistency.
+#define SRALLOC_BYTES( allocator, size ) sralloc_alloc( allocator, size )
+#define SRALLOC_OBJECT( allocator, type ) ( (type*)sralloc_alloc( allocator, sizeof( size ) ) )
+#define SRALLOC_ARRAY( allocator, type, length ) \
+    ( (type*)sralloc_alloc( allocator, sizeof( size ) * length ) );
+
+#define SRALLOC_ALIGNED_BYTES( allocator, size ) sralloc_alloc_aligned( allocator, size )
+#define SRALLOC_ALIGNED_OBJECT( allocator, type ) \
+    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ) ) )
+#define SRALLOC_ALIGNED_ARRAY( allocator, type, length ) \
+    ( (type*)sralloc_alloc_aligned( allocator, sizeof( type ) * length ) );
+
+#define SRALLOC_DEALLOC( allocator, ptr ) sralloc_alloc(allocator, sizeof(size) * length));
+
+#ifdef __cplusplus
+}
+#endif
+
+// Implementation
 #ifdef SRALLOC_IMPLEMENTATION
 
 #ifndef SRALLOC_malloc
@@ -545,6 +560,25 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
 
 #endif // SRALLOC_IMPLEMENTATION
 
+#if defined( __cplusplus ) && !defined( SRALLOC_NO_CLASSES )
+#define SRALLOC_DISALLOW_COPY_AND_ASSIGN( type ) \
+    type( const type& ) = delete;                \
+    void operator=( const type& ) = delete;
+
+namespace sralloc {
+class malloc_allocator {
+  public:
+    malloc_allocator() { _allocator = sralloc_create_malloc_allocator(); };
+    ~malloc_allocator() { sralloc_destroy_malloc_allocator(); };
+    void* allocate( srint_t size ) {}
+
+  private:
+    SRALLOC_DISALLOW_COPY_AND_ASSIGN( malloc_allocator );
+    srallocator_t* _allocator;
+}
+} // namespace sralloc
+#endif //__cplusplus && SRALLOC_NO_CLASSES
+
 #ifndef SRALLOC_ENABLE_WARNINGS
 #ifdef _MSC_VER
 #pragma warning( pop )
@@ -552,6 +586,10 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
 
 #ifdef __clang__
 #pragma clang diagnostic pop
+#endif
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
 #endif
 #endif // DEBUGINATOR_ENABLE_WARNINGS
 
