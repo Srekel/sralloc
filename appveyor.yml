@@ -1,0 +1,40 @@
+#---------------------------------#
+#      general configuration      #
+#---------------------------------#
+
+# version format
+version: 1.0.{build}
+
+#---------------------------------#
+#    environment configuration    #
+#---------------------------------#
+
+image:
+  - Visual Studio 2015
+  - Visual Studio 2017
+
+#platform:
+#  - x86
+#  - Any CPU
+
+configuration:
+ - Debug
+ - Release
+
+build:
+  parallel: true
+  project: examples/sralloc.sln
+
+# scripts to run after build
+# after_build:
+
+#---------------------------------#
+#       tests configuration       #
+#---------------------------------#
+
+# to run your custom scripts instead of automatic tests
+test_script:
+  - '%APPVEYOR_BUILD_FOLDER%\examples\build\%PLATFORM%_%CONFIGURATION%\unittest.exe'
+
+# to disable automatic tests
+#test: off
