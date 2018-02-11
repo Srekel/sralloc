@@ -32,7 +32,7 @@ build:
 
 # to run your custom scripts instead of automatic tests
 test_script:
-  - '%APPVEYOR_BUILD_FOLDER%\examples\build\%PLATFORM%_%CONFIGURATION%\unittest.exe'
+  - examples\build\%PLATFORM%_%CONFIGURATION%\unittest.exe
 
 # to disable automatic tests
 #test: off
