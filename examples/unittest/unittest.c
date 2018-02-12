@@ -1,4 +1,3 @@
-// #include <stdafx.h>
 
 #define SRALLOC_IMPLEMENTATION
 #ifdef _MSC_VER
