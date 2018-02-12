@@ -18,6 +18,12 @@
 #pragma warning( pop )
 #endif
 
+#ifdef _MSC_VER
+#pragma warning( push, 0 )
+#include <Windows.h>
+#pragma warning( pop )
+#endif
+
 void
 generic_allocator_tests( srallocator_t* allocator ) {
     lequal( allocator->stats.num_allocations, 0 );
@@ -60,7 +66,11 @@ main( void ) {
 
     lresults();
 
-    system( "pause" );
+#ifdef _MSC_VER
+    if ( IsDebuggerPresent() ) {
+        system( "pause" );
+    }
+#endif
 
     return lfails != 0;
 }
