@@ -12,8 +12,8 @@ version: 1.0.{build}
 image: Visual Studio 2017
 
 platform:
- - x86
- - x64
+  - x64
+  - Win32
 
 configuration:
  - Debug
