@@ -1,4 +1,3 @@
-// #include <stdafx.h>
 
 #define SRALLOC_IMPLEMENTATION
 #ifdef _MSC_VER
@@ -16,6 +15,12 @@
 
 #include "../external/minctest/minctest.h"
 #ifdef _MSC_VER
+#pragma warning( pop )
+#endif
+
+#ifdef _MSC_VER
+#pragma warning( push, 0 )
+#include <Windows.h>
 #pragma warning( pop )
 #endif
 
@@ -61,7 +66,11 @@ main( void ) {
 
     lresults();
 
-    system( "pause" );
+#ifdef _MSC_VER
+    if ( IsDebuggerPresent() ) {
+        system( "pause" );
+    }
+#endif
 
     return lfails != 0;
 }

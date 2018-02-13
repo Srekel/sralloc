@@ -299,8 +299,8 @@ sralloc_dealloc( srallocator_t* allocator, void* ptr ) {
 
 static allocation_result_t
 sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
-    size += align;
     SRALLOC_UNUSED( allocator );
+    size += align;
 #ifdef SRALLOC_USE_STATS
     allocator->stats.amount_allocated += size;
     allocator->stats.num_allocations++;
