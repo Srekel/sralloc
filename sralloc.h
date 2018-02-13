@@ -88,6 +88,17 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 
 #define SRALLOC_DEALLOC( allocator, ptr ) sralloc_alloc(allocator, sizeof(size) * length));
 
+// Registry API
+// #ifndef SRALLOC_DISABLE_REGISTRY
+// void            sralloc_registry_init();
+// void*           sralloc_registry_get_state();
+// void            sralloc_registry_set_state( void* state );
+// void            sralloc_registry_register_allocator( srallocator_t* allocator );
+// void            sralloc_registry_add_child( srallocator_t* parent, srallocator_t* child );
+// srallocator_t*  sralloc_registry_get_parent( srallocator_t* allocator );
+// srallocator_t** sralloc_registry_get_children( srallocator_t* allocator );
+// #endif
+
 #ifdef __cplusplus
 }
 #endif
@@ -148,12 +159,12 @@ typedef void ( *sralloc_deallocate_func )( srallocator_t* allocator, void* ptr )
 
 struct srallocator {
     const char*             name;
+    sralloc_allocate_func   allocate_func;
+    sralloc_deallocate_func deallocate_func;
     srallocator_t*          parent;
     srallocator_t**         children;
     srint_t                 num_children;
     srint_t                 children_capacity;
-    sralloc_allocate_func   allocate_func;
-    sralloc_deallocate_func deallocate_func;
 #ifdef SRALLOC_USE_STATS
     sralloc_stats_t stats;
 #endif
@@ -582,6 +593,38 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     // ███████╗███████╗██║  ██║╚██████╔╝
     // ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝
     //
+
+// #ifndef SRALLOC_DISABLE_REGISTRY
+// typedef struct {
+//     srallocator_t*  allocator;
+//     srallocator_t*  parent;
+//     srallocator_t** children;
+//     srint_t         num_children;
+//     srint_t         children_capacity;
+// } sralloc_allocator_data_t;
+
+// typedef struct {
+//     sralloc_allocator_data_t* allocators;
+//     srint_t                   num_allocators;
+//     srint_t                   allocator_capacity;
+// } sralloc_registry_t;
+
+// static sralloc_registry_t s_registry;
+
+// static void
+// sralloc_registry_init() {
+//     SRALLOC_memset( &s_registry, 0, sizeof( s_registry ) );
+// }
+// void*                sralloc_registry_get_state();
+// void                 sralloc_registry_set_state( void* state );
+// void                 sralloc_registry_register_allocator( srallocator_t* allocator );
+// void                 sralloc_registry_add_child( srallocator_t* parent, srallocator_t* child );
+// srallocator_t*       sralloc_registry_get_parent( srallocator_t* allocator );
+// srallocator_t**      sralloc_registry_get_children( srallocator_t* allocator );
+// srallocator_handle_t sralloc_registry_get_handle( srallocator_t* allocator );
+// srallocator_handle_t sralloc_registry_get_allocator( srallocator_handle_t* handle );
+
+// #endif
 
 #endif // SRALLOC_IMPLEMENTATION
 
