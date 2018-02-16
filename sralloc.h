@@ -35,7 +35,7 @@ typedef uintptr_t srintptr_t;
 typedef struct {
     void*   ptr;
     srint_t size;
-} allocation_result_t;
+} sr_result_t;
 
 #if defined( SRALLOC_STATIC )
 #define SRALLOC_API static
@@ -45,13 +45,13 @@ typedef struct {
 
 // General API
 SRALLOC_API void* sralloc_alloc( srallocator_t* allocator, srint_t size );
-SRALLOC_API allocation_result_t sralloc_alloc_with_size( srallocator_t* allocator, srint_t size );
+SRALLOC_API sr_result_t sralloc_alloc_with_size( srallocator_t* allocator, srint_t size );
 SRALLOC_API void* sralloc_alloc_aligned( srallocator_t* allocator, srint_t size, srint_t align );
-SRALLOC_API allocation_result_t sralloc_alloc_aligned_with_size( srallocator_t* allocator,
-                                                                 srint_t        size,
-                                                                 srint_t        align );
-SRALLOC_API void                sralloc_dealloc( srallocator_t* allocator, void* ptr );
-SRALLOC_API void* sralloc_allocate( srallocator_t* allocator, srint_t size, srint_t align );
+SRALLOC_API sr_result_t sralloc_alloc_aligned_with_size( srallocator_t* allocator,
+                                                         srint_t        size,
+                                                         srint_t        align );
+SRALLOC_API void        sralloc_dealloc( srallocator_t* allocator, void* ptr );
+SRALLOC_API void*       sralloc_allocate( srallocator_t* allocator, srint_t size, srint_t align );
 
 // Malloc allocator (global allocator)
 SRALLOC_API srallocator_t* sralloc_create_malloc_allocator( const char* name );
@@ -139,12 +139,24 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #define SRALLOC_UNUSED( ... ) (void)( __VA_ARGS__ )
 #endif
 
-#ifndef SRALLOC_NO_DEALLOC_PATTERN
-// TODO
+#ifdef SRALLOC_DO_WRITE_DEALLOC_PATTERN
+#ifndef SRALLOC_DEALLOC_PATTERN
+#define SRALLOC_DEALLOC_PATTERN 0xcd
+#endif
+#define SRALLOC_WRITE_DEALLOC_PATTERN( ptr, size ) \
+    SRALLOC_memcpy( ptr, SRALLOC_DEALLOC_PATTERN, size )
+#else
+#define SRALLOC_WRITE_DEALLOC_PATTERN( ptr, size )
 #endif
 
 #ifndef SRALLOC_DISABLE_STATS
 #define SRALLOC_USE_STATS
+#endif
+
+#ifdef SRALLOC_USE_NAME
+#define SRALLOC_SET_NAME( allocator, name ) allocator->name = name
+#else
+#define SRALLOC_SET_NAME( allocator, name ) ( (void)name )
 #endif
 
 typedef struct {
@@ -152,13 +164,15 @@ typedef struct {
     int amount_allocated;
 } sralloc_stats_t;
 
-typedef allocation_result_t ( *sralloc_allocate_func )( srallocator_t* allocator,
-                                                        srint_t        size,
-                                                        srint_t        align );
+typedef sr_result_t ( *sralloc_allocate_func )( srallocator_t* allocator,
+                                                srint_t        size,
+                                                srint_t        align );
 typedef void ( *sralloc_deallocate_func )( srallocator_t* allocator, void* ptr );
 
 struct srallocator {
-    const char*             name;
+#ifdef SRALLOC_USE_NAME
+    const char* name;
+#endif
     sralloc_allocate_func   allocate_func;
     sralloc_deallocate_func deallocate_func;
     srallocator_t*          parent;
@@ -248,10 +262,10 @@ sralloc_alloc( srallocator_t* allocator, srint_t size ) {
     return allocator->allocate_func( allocator, size, 0 ).ptr;
 }
 
-SRALLOC_API allocation_result_t
+SRALLOC_API sr_result_t
             sralloc_alloc_with_size( srallocator_t* allocator, srint_t size ) {
     if ( size == 0 ) {
-        allocation_result_t res = { SRALLOC_ZERO_SIZE_PTR, 0 };
+        sr_result_t res = { SRALLOC_ZERO_SIZE_PTR, 0 };
         return res;
     }
 
@@ -267,10 +281,10 @@ sralloc_alloc_aligned( srallocator_t* allocator, srint_t size, srint_t align ) {
     return allocator->allocate_func( allocator, size, align ).ptr;
 }
 
-SRALLOC_API allocation_result_t
+SRALLOC_API sr_result_t
             sralloc_alloc_aligned_with_size( srallocator_t* allocator, srint_t size, srint_t align ) {
     if ( size == 0 ) {
-        allocation_result_t res = { SRALLOC_ZERO_SIZE_PTR, 0 };
+        sr_result_t res = { SRALLOC_ZERO_SIZE_PTR, 0 };
         return res;
     }
 
@@ -297,7 +311,7 @@ sralloc_dealloc( srallocator_t* allocator, void* ptr ) {
 // ██║ ╚═╝ ██║██║  ██║███████╗███████╗╚██████╔╝╚██████╗
 // ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═════╝  ╚═════╝
 
-static allocation_result_t
+static sr_result_t
 sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
     SRALLOC_UNUSED( allocator );
     size += align;
@@ -308,7 +322,7 @@ sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align )
     srint_t   metadata_size = sizeof( srint_t ) + sizeof( srint_t );
     srchar_t* unaligned_ptr = SRALLOC_malloc( size + metadata_size + align );
     if ( unaligned_ptr == SRALLOC_NULL ) {
-        allocation_result_t res = { SRALLOC_NULL, 0 };
+        sr_result_t res = { SRALLOC_NULL, 0 };
         return res;
     }
 
@@ -322,7 +336,7 @@ sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align )
     srint_t*  size_ptr            = offset_ptr - 1;
     *offset_ptr                   = ( srint_t )( ptr - unaligned_ptr );
     *size_ptr                     = size;
-    allocation_result_t res;
+    sr_result_t res;
     res.ptr  = (void*)ptr;
     res.size = size;
     return res;
@@ -350,7 +364,7 @@ SRALLOC_API srallocator_t*
             sralloc_create_malloc_allocator( const char* name ) {
     srallocator_t* allocator = (srallocator_t*)SRALLOC_malloc( sizeof( srallocator_t ) );
     SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
-    allocator->name            = name;
+    SRALLOC_SET_NAME( allocator, name );
     allocator->allocate_func   = sralloc_malloc_allocate;
     allocator->deallocate_func = sralloc_malloc_deallocate;
     return allocator;
@@ -387,7 +401,7 @@ typedef struct {
     srint_t                   num_states;
 } srallocator_stack_t;
 
-static allocation_result_t
+static sr_result_t
 sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
     SRALLOC_UNUSED( align );
 #ifdef SRALLOC_USE_STATS
@@ -399,7 +413,7 @@ sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) 
     char*                ptr             = (char*)stack_allocator->top;
     stack_allocator->top                 = ptr + size;
     SRALLOC_assert( stack_allocator->top <= stack_allocator->end );
-    allocation_result_t res;
+    sr_result_t res;
     res.ptr  = (void*)( ptr );
     res.size = size;
     return res;
@@ -464,7 +478,7 @@ SRALLOC_API srallocator_t*
     sralloc_add_child_allocator( parent, allocator );
 
     SRALLOC_memset( allocator, 0, allocator_size );
-    allocator->name             = name;
+    SRALLOC_SET_NAME( allocator, name );
     allocator->parent           = parent;
     allocator->allocate_func    = sralloc_stack_allocate;
     allocator->deallocate_func  = sralloc_stack_deallocate;
@@ -594,56 +608,103 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     // ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝
     //
 
-// #ifndef SRALLOC_DISABLE_REGISTRY
-// typedef struct {
-//     srallocator_t*  allocator;
-//     srallocator_t*  parent;
-//     srallocator_t** children;
-//     srint_t         num_children;
-//     srint_t         children_capacity;
-// } sralloc_allocator_data_t;
+    // #ifndef SRALLOC_DISABLE_REGISTRY
+    // typedef struct {
+    //     srallocator_t*  allocator;
+    //     srallocator_t*  parent;
+    //     srallocator_t** children;
+    //     srint_t         num_children;
+    //     srint_t         children_capacity;
+    // } sralloc_allocator_data_t;
 
-// typedef struct {
-//     sralloc_allocator_data_t* allocators;
-//     srint_t                   num_allocators;
-//     srint_t                   allocator_capacity;
-// } sralloc_registry_t;
+    // typedef struct {
+    //     sralloc_allocator_data_t* allocators;
+    //     srint_t                   num_allocators;
+    //     srint_t                   allocator_capacity;
+    // } sralloc_registry_t;
 
-// static sralloc_registry_t s_registry;
+    // static sralloc_registry_t s_registry;
 
-// static void
-// sralloc_registry_init() {
-//     SRALLOC_memset( &s_registry, 0, sizeof( s_registry ) );
-// }
-// void*                sralloc_registry_get_state();
-// void                 sralloc_registry_set_state( void* state );
-// void                 sralloc_registry_register_allocator( srallocator_t* allocator );
-// void                 sralloc_registry_add_child( srallocator_t* parent, srallocator_t* child );
-// srallocator_t*       sralloc_registry_get_parent( srallocator_t* allocator );
-// srallocator_t**      sralloc_registry_get_children( srallocator_t* allocator );
-// srallocator_handle_t sralloc_registry_get_handle( srallocator_t* allocator );
-// srallocator_handle_t sralloc_registry_get_allocator( srallocator_handle_t* handle );
+    // static void
+    // sralloc_registry_init() {
+    //     SRALLOC_memset( &s_registry, 0, sizeof( s_registry ) );
+    // }
+    // void*                sralloc_registry_get_state();
+    // void                 sralloc_registry_set_state( void* state );
+    // void                 sralloc_registry_register_allocator( srallocator_t* allocator );
+    // void                 sralloc_registry_add_child( srallocator_t* parent, srallocator_t* child
+    // ); srallocator_t*       sralloc_registry_get_parent( srallocator_t* allocator );
+    // srallocator_t**      sralloc_registry_get_children( srallocator_t* allocator );
+    // srallocator_handle_t sralloc_registry_get_handle( srallocator_t* allocator );
+    // srallocator_handle_t sralloc_registry_get_allocator( srallocator_handle_t* handle );
 
-// #endif
+    // #endif
 
 #endif // SRALLOC_IMPLEMENTATION
 
 #if defined( __cplusplus ) && !defined( SRALLOC_NO_CLASSES )
-#define SRALLOC_DISALLOW_COPY_AND_ASSIGN( type ) \
-    type( const type& ) = delete;                \
-    void operator=( const type& ) = delete;
 
 namespace sralloc {
-class malloc_allocator {
+class Allocator {
   public:
-    malloc_allocator() { _allocator = sralloc_create_malloc_allocator(); };
-    ~malloc_allocator() { sralloc_destroy_malloc_allocator(); };
-    void* allocate( srint_t size ) {}
+    // clang-format off
+    static Allocator create_malloc_allocator( const char* name )
+                    { return Allocator( sralloc_create_malloc_allocator( name ) ); }
+    static Allocator create_stack_allocator( const char* name, srallocator_t* parent, srint_t capacity )
+                    { return Allocator( sralloc_create_stack_allocator( name, parent, capacity ) ); }
+
+    void*       allocate( srint_t size )
+                    { return sralloc_alloc( _allocator, size ); }
+
+    sr_result_t allocate_with_size( srint_t size )
+                    { sralloc_alloc_with_size( _allocator, size ); }
+
+    void*       allocate_aligned( srint_t size, srint_t align )
+                    { sralloc_alloc_aligned( _allocator, size ); }
+
+    sr_result_t allocate_aligned_with_size( srint_t size, srint_t align )
+                    { sralloc_alloc_aligned_with_size( _allocator, size ); }
+
+    template <typename T>
+    T*          allocate()
+                    { return static_cast<T*>( allocate( sizeof( T ) ) ); }
+
+    template <typename T>
+    T*          allocate_aligned( srint_t align )
+                    { return static_cast<T*>( allocate_aligned( sizeof( T ), align ) ); }
+
+    void        deallocate( void* ptr )
+                    { sralloc_dealloc( _allocator, ptr ); }
+    // clang-format on
+
+    ~Allocator() {
+        switch ( _type ) {
+        case AllocatorMalloc:
+            sralloc_destroy_malloc_allocator( _allocator );
+            break;
+        case AllocatorStack:
+            sralloc_destroy_stack_allocator( _allocator );
+            break;
+        }
+    }
 
   private:
-    SRALLOC_DISALLOW_COPY_AND_ASSIGN( malloc_allocator );
+    Allocator( srallocator_t* allocator )
+    : _allocator( allocator ) {}
+
+    Allocator( const Allocator& ) = delete;
+    void operator=( const Allocator& ) = delete;
+
+    enum AllocatorType {
+        AllocatorInvalid = 0,
+        AllocatorMalloc,
+        AllocatorStack,
+    };
+
     srallocator_t* _allocator;
-}
+    AllocatorType  _type;
+};
+
 } // namespace sralloc
 #endif //__cplusplus && SRALLOC_NO_CLASSES
 

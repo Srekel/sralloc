@@ -1,7 +1,7 @@
 
 #define SRALLOC_IMPLEMENTATION
 #ifdef _MSC_VER
-#pragma warning( disable : 4464 )
+#pragma warning( disable : 4464 4710 )
 #endif
 #include "../../sralloc.h"
 
