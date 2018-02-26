@@ -1,5 +1,7 @@
 
 #define SRALLOC_IMPLEMENTATION
+// #define SRALLOC_DISABLE_NAMES
+// #define SRALLOC_DISABLE_STATS
 #ifdef _MSC_VER
 #pragma warning( disable : 4464 4710 )
 #endif
@@ -7,7 +9,7 @@
 
 #ifdef _MSC_VER
 #pragma warning( push )
-#pragma warning( disable : 4777 4710 )
+#pragma warning( disable : 4777 4710 4005 )
 
 #pragma warning( push )
 #pragma warning( disable : 4464 4820 )
@@ -22,6 +24,10 @@
 #pragma warning( push, 0 )
 #include <Windows.h>
 #pragma warning( pop )
+#endif
+
+#ifdef SRALLOC_DISABLE_STATS
+#define lequal(...)
 #endif
 
 void

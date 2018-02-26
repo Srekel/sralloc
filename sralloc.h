@@ -153,10 +153,8 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #define SRALLOC_USE_STATS
 #endif
 
-#ifdef SRALLOC_USE_NAME
-#define SRALLOC_SET_NAME( allocator, name ) allocator->name = name
-#else
-#define SRALLOC_SET_NAME( allocator, name ) ( (void)name )
+#ifndef SRALLOC_DISABLE_NAMES
+#define SRALLOC_USE_NAMES
 #endif
 
 typedef struct {
@@ -170,16 +168,16 @@ typedef sr_result_t ( *sralloc_allocate_func )( srallocator_t* allocator,
 typedef void ( *sralloc_deallocate_func )( srallocator_t* allocator, void* ptr );
 
 struct srallocator {
-#ifdef SRALLOC_USE_NAME
+#ifdef SRALLOC_USE_NAMES
     const char* name;
 #endif
     sralloc_allocate_func   allocate_func;
     sralloc_deallocate_func deallocate_func;
-    srallocator_t*          parent;
-    srallocator_t**         children;
-    srint_t                 num_children;
-    srint_t                 children_capacity;
 #ifdef SRALLOC_USE_STATS
+    srallocator_t*  parent;
+    srallocator_t** children;
+    srint_t         num_children;
+    srint_t         children_capacity;
     sralloc_stats_t stats;
 #endif
 };
@@ -193,6 +191,9 @@ struct srallocator {
 
 static void
 sr__add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
+    SRALLOC_UNUSED( parent, child );
+#ifdef SRALLOC_USE_STATS
+    child->parent = parent;
     if ( parent->children_capacity > parent->num_children ) {
         parent->children[parent->num_children++] = child;
         return;
@@ -219,10 +220,13 @@ sr__add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
         parent->children                         = (srallocator_t**)new_children;
         parent->children[parent->num_children++] = child;
     }
+#endif // SRALLOC_USE_STATS
 }
 
 static void
 sr__remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
+    SRALLOC_UNUSED( parent, child );
+#ifdef SRALLOC_USE_STATS
     for ( srint_t i_child = 0; i_child < parent->num_children; ++i_child ) {
         if ( parent->children[i_child] == child ) {
             parent->children[i_child] = parent->children[--parent->num_children];
@@ -244,6 +248,15 @@ sr__remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
     }
 
     SRALLOC_assert( 0 );
+#endif // SRALLOC_USE_STATS
+}
+
+static void
+sr__set_name( srallocator_t* allocator, const srchar_t* name ) {
+    SRALLOC_UNUSED( allocator, name );
+#ifdef SRALLOC_USE_NAMES
+    allocator->name = name;
+#endif
 }
 
 static void*
@@ -341,6 +354,7 @@ typedef struct {
 
 static sr_result_t
 sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+    SRALLOC_UNUSED( allocator );
     srint_t preamble_size = sizeof( sralloc_malloc_preamble_t );
     size += align;
     size += preamble_size;
@@ -383,7 +397,7 @@ SRALLOC_API srallocator_t*
             sralloc_create_malloc_allocator( const char* name ) {
     srallocator_t* allocator = (srallocator_t*)SRALLOC_malloc( sizeof( srallocator_t ) );
     SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
-    SRALLOC_SET_NAME( allocator, name );
+    sr__set_name( allocator, name );
     allocator->allocate_func   = sralloc_malloc_allocate;
     allocator->deallocate_func = sralloc_malloc_deallocate;
     return allocator;
@@ -391,8 +405,8 @@ SRALLOC_API srallocator_t*
 
 SRALLOC_API void
 sralloc_destroy_malloc_allocator( srallocator_t* allocator ) {
-    SRALLOC_assert( allocator->num_children == 0 );
 #ifdef SRALLOC_USE_STATS
+    SRALLOC_assert( allocator->num_children == 0 );
     SRALLOC_assert( allocator->stats.num_allocations == 0 );
     SRALLOC_assert( allocator->stats.amount_allocated == 0 );
 #endif
@@ -421,6 +435,7 @@ typedef struct {
 typedef struct {
     void*                     top;
     void*                     end;
+    srallocator_t*            backing_allocator;
     srallocator_stack_state_t states[4];
     srint_t                   num_states;
 } srallocator_stack_t;
@@ -432,7 +447,7 @@ sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) 
     size += preamble_size;
 
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
-    if ( size > sr__ptr_diff(stack_allocator->end, stack_allocator->top ) ) {
+    if ( size > sr__ptr_diff( stack_allocator->end, stack_allocator->top ) ) {
         sr_result_t res = { SRALLOC_NULL, 0 };
         return res;
     }
@@ -501,22 +516,21 @@ sralloc_stack_allocator_pop_state( srallocator_t* allocator ) {
 }
 
 SRALLOC_API srallocator_t*
-            sralloc_create_stack_allocator( const char* name, srallocator_t* parent, srint_t capacity ) {
+            sralloc_create_stack_allocator( const char* name, srallocator_t* backing, srint_t capacity ) {
     srint_t allocator_size = sizeof( srallocator_t ) + sizeof( srallocator_stack_t ) + capacity;
-    void*   memory         = sralloc_alloc( parent, allocator_size );
+    void*   memory         = sralloc_alloc( backing, allocator_size );
     srallocator_t*       allocator       = (srallocator_t*)memory;
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
 
-    sr__add_child_allocator( parent, allocator );
-
     SRALLOC_memset( allocator, 0, allocator_size );
-    SRALLOC_SET_NAME( allocator, name );
-    allocator->parent           = parent;
-    allocator->allocate_func    = sralloc_stack_allocate;
-    allocator->deallocate_func  = sralloc_stack_deallocate;
-    stack_allocator->top        = stack_allocator + 1;
-    stack_allocator->end        = ( (char*)stack_allocator->top ) + capacity;
-    stack_allocator->num_states = 0;
+    sr__add_child_allocator( backing, allocator );
+    sr__set_name( allocator, name );
+    allocator->allocate_func           = sralloc_stack_allocate;
+    allocator->deallocate_func         = sralloc_stack_deallocate;
+    stack_allocator->top               = stack_allocator + 1;
+    stack_allocator->end               = ( (char*)stack_allocator->top ) + capacity;
+    stack_allocator->num_states        = 0;
+    stack_allocator->backing_allocator = backing;
     return allocator;
 }
 
@@ -525,14 +539,14 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
 #ifdef SRALLOC_USE_STATS
     SRALLOC_assert( allocator->stats.num_allocations == 0 );
     SRALLOC_assert( allocator->stats.amount_allocated == 0 );
-#endif
     sr__remove_child_allocator( allocator->parent, allocator );
+    SRALLOC_assert( allocator->num_children == 0 );
+#endif
 
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
     SRALLOC_UNUSED( stack_allocator );
     SRALLOC_assert( stack_allocator->num_states == 0 );
-    SRALLOC_assert( allocator->num_children == 0 );
-    sralloc_dealloc( allocator->parent, allocator );
+    sralloc_dealloc( stack_allocator->backing_allocator, allocator );
 }
 
     // ███████╗██╗      ██████╗ ████████╗
