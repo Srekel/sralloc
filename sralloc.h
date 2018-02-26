@@ -29,7 +29,7 @@ typedef struct srallocator srallocator_t;
 typedef char      srchar_t;
 typedef int       srint_t;
 typedef short     srshort_t;
-typedef uintptr_t srintptr_t;
+typedef uintptr_t sruintptr_t;
 #endif
 
 typedef struct {
@@ -191,8 +191,8 @@ struct srallocator {
 // ██║██║ ╚████║   ██║   ███████╗██║  ██║██║ ╚████║██║  ██║███████╗
 // ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝
 
-void
-sralloc_add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
+static void
+sr__add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
     if ( parent->children_capacity > parent->num_children ) {
         parent->children[parent->num_children++] = child;
         return;
@@ -221,8 +221,8 @@ sralloc_add_child_allocator( srallocator_t* parent, srallocator_t* child ) {
     }
 }
 
-void
-sralloc_remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
+static void
+sr__remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
     for ( srint_t i_child = 0; i_child < parent->num_children; ++i_child ) {
         if ( parent->children[i_child] == child ) {
             parent->children[i_child] = parent->children[--parent->num_children];
@@ -244,6 +244,29 @@ sralloc_remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
     }
 
     SRALLOC_assert( 0 );
+}
+
+static void*
+sr__ptr_to_aligned_ptr( void* ptr, srint_t align ) {
+    sruintptr_t offset      = ( ~(sruintptr_t)ptr + 1 ) & ( align - 1 );
+    void*       aligned_ptr = (srchar_t*)ptr + offset;
+    return aligned_ptr;
+}
+
+static srchar_t*
+sr__aligned_ptr_after_preamble( void* ptr, srint_t preamble_size, srint_t align ) {
+    srchar_t* after_preamble = (srchar_t*)ptr + preamble_size;
+    if ( align == 0 ) {
+        return after_preamble;
+    }
+    else {
+        return sr__ptr_to_aligned_ptr( after_preamble, align );
+    }
+}
+
+static srint_t
+sr__ptr_diff( void* ptr1, void* ptr2 ) {
+    return ( srint_t )( (srchar_t*)ptr1 - (srchar_t*)ptr2 );
 }
 
 //  █████╗ ██████╗ ██╗
@@ -311,31 +334,33 @@ sralloc_dealloc( srallocator_t* allocator, void* ptr ) {
 // ██║ ╚═╝ ██║██║  ██║███████╗███████╗╚██████╔╝╚██████╗
 // ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═════╝  ╚═════╝
 
+typedef struct {
+    srint_t offset;
+    srint_t size;
+} sralloc_malloc_preamble_t;
+
 static sr_result_t
 sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
-    SRALLOC_UNUSED( allocator );
+    srint_t preamble_size = sizeof( sralloc_malloc_preamble_t );
     size += align;
+    size += preamble_size;
+
 #ifdef SRALLOC_USE_STATS
     allocator->stats.amount_allocated += size;
     allocator->stats.num_allocations++;
 #endif
-    srint_t   metadata_size = sizeof( srint_t ) + sizeof( srint_t );
-    srchar_t* unaligned_ptr = SRALLOC_malloc( size + metadata_size + align );
+
+    srchar_t* unaligned_ptr = SRALLOC_malloc( size );
     if ( unaligned_ptr == SRALLOC_NULL ) {
         sr_result_t res = { SRALLOC_NULL, 0 };
         return res;
     }
 
-    // | unaligned_ptr | size | offset | ptr |
-    // srint_t to_ptr =
-    //   align == 0 ? sizeof( srint_t ) * 2 : align - ( ( (srintptr_t)unaligned_ptr ) % align );
-    srchar_t* ptr_after_alignment = unaligned_ptr + metadata_size + align;
-    srint_t   alignment_padding   = align == 0 ? 0 : ( (srintptr_t)ptr_after_alignment % align );
-    srchar_t* ptr                 = ptr_after_alignment - alignment_padding;
-    srint_t*  offset_ptr          = ( (srint_t*)ptr ) - 1;
-    srint_t*  size_ptr            = offset_ptr - 1;
-    *offset_ptr                   = ( srint_t )( ptr - unaligned_ptr );
-    *size_ptr                     = size;
+    srchar_t* ptr = sr__aligned_ptr_after_preamble( unaligned_ptr, preamble_size, align );
+    sralloc_malloc_preamble_t* preamble = (sralloc_malloc_preamble_t*)ptr - 1;
+    preamble->size                      = size;
+    preamble->offset                    = sr__ptr_diff( preamble, unaligned_ptr );
+
     sr_result_t res;
     res.ptr  = (void*)ptr;
     res.size = size;
@@ -345,17 +370,11 @@ sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align )
 static void
 sralloc_malloc_deallocate( srallocator_t* allocator, void* ptr ) {
     SRALLOC_UNUSED( allocator );
-    srint_t*  malloc_ptr    = (srint_t*)ptr;
-    srint_t*  offset_ptr    = malloc_ptr - 1;
-    srint_t*  size_ptr      = offset_ptr - 1;
-    srint_t   offset        = *offset_ptr;
-    srint_t   size          = *size_ptr;
-    srchar_t* unaligned_ptr = (srchar_t*)ptr - offset;
+    sralloc_malloc_preamble_t* preamble      = (sralloc_malloc_preamble_t*)ptr - 1;
+    srchar_t*                  unaligned_ptr = (srchar_t*)preamble - preamble->offset;
 #ifdef SRALLOC_USE_STATS
-    allocator->stats.amount_allocated -= size;
+    allocator->stats.amount_allocated -= preamble->size;
     allocator->stats.num_allocations--;
-#else
-    SRALLOC_UNUSED( size );
 #endif
     SRALLOC_free( unaligned_ptr );
 }
@@ -388,6 +407,11 @@ sralloc_destroy_malloc_allocator( srallocator_t* allocator ) {
 // ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
 
 typedef struct {
+    srint_t offset;
+    srint_t size;
+} sralloc_stack_preamble_t;
+
+typedef struct {
     void* top;
 #ifdef SRALLOC_USE_STATS
     sralloc_stats_t stats;
@@ -403,16 +427,27 @@ typedef struct {
 
 static sr_result_t
 sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
-    SRALLOC_UNUSED( align );
+    srint_t preamble_size = sizeof( sralloc_stack_preamble_t );
+    size += align;
+    size += preamble_size;
+
+    srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
+    if ( size > sr__ptr_diff(stack_allocator->end, stack_allocator->top ) ) {
+        sr_result_t res = { SRALLOC_NULL, 0 };
+        return res;
+    }
+
 #ifdef SRALLOC_USE_STATS
     allocator->stats.amount_allocated += size;
     allocator->stats.num_allocations++;
 #endif
 
-    srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
-    char*                ptr             = (char*)stack_allocator->top;
-    stack_allocator->top                 = ptr + size;
-    SRALLOC_assert( stack_allocator->top <= stack_allocator->end );
+    void*     unaligned_ptr = stack_allocator->top;
+    srchar_t* ptr           = sr__aligned_ptr_after_preamble( unaligned_ptr, preamble_size, align );
+    sralloc_malloc_preamble_t* preamble = (sralloc_malloc_preamble_t*)ptr - 1;
+    preamble->size                      = size;
+    preamble->offset                    = sr__ptr_diff( preamble, unaligned_ptr );
+    stack_allocator->top                = ptr + size;
     sr_result_t res;
     res.ptr  = (void*)( ptr );
     res.size = size;
@@ -421,16 +456,13 @@ sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) 
 
 static void
 sralloc_stack_deallocate( srallocator_t* allocator, void* ptr ) {
-    srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
-    SRALLOC_assert( ptr < stack_allocator->top );
-
-    srint_t size         = ( srint_t )( (char*)stack_allocator->top - (char*)ptr );
-    stack_allocator->top = ptr;
+    srallocator_stack_t*       stack_allocator = (srallocator_stack_t*)( allocator + 1 );
+    sralloc_malloc_preamble_t* preamble        = (sralloc_malloc_preamble_t*)ptr - 1;
+    srchar_t*                  unaligned_ptr   = (srchar_t*)preamble - preamble->offset;
+    stack_allocator->top                       = unaligned_ptr;
 #ifdef SRALLOC_USE_STATS
-    allocator->stats.amount_allocated -= size;
+    allocator->stats.amount_allocated -= preamble->size;
     allocator->stats.num_allocations--;
-#else
-    SRALLOC_UNUSED( size );
 #endif
 }
 
@@ -475,7 +507,7 @@ SRALLOC_API srallocator_t*
     srallocator_t*       allocator       = (srallocator_t*)memory;
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
 
-    sralloc_add_child_allocator( parent, allocator );
+    sr__add_child_allocator( parent, allocator );
 
     SRALLOC_memset( allocator, 0, allocator_size );
     SRALLOC_SET_NAME( allocator, name );
@@ -494,7 +526,7 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     SRALLOC_assert( allocator->stats.num_allocations == 0 );
     SRALLOC_assert( allocator->stats.amount_allocated == 0 );
 #endif
-    sralloc_remove_child_allocator( allocator->parent, allocator );
+    sr__remove_child_allocator( allocator->parent, allocator );
 
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
     SRALLOC_UNUSED( stack_allocator );

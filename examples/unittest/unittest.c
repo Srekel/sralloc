@@ -28,14 +28,33 @@ void
 generic_allocator_tests( srallocator_t* allocator ) {
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
-    void* p1 = sralloc_alloc( allocator, 100 );
-    void* p2 = sralloc_alloc( allocator, 1000 );
-    lequal( allocator->stats.num_allocations, 2 );
-    lequal( allocator->stats.amount_allocated, 1100 );
-    sralloc_dealloc( allocator, p2 );
+
+    // Single
+    void* pA1 = sralloc_alloc( allocator, 100 );
     lequal( allocator->stats.num_allocations, 1 );
-    lequal( allocator->stats.amount_allocated, 100 );
-    sralloc_dealloc( allocator, p1 );
+    sralloc_dealloc( allocator, pA1 );
+    lequal( allocator->stats.num_allocations, 0 );
+    lequal( allocator->stats.amount_allocated, 0 );
+
+    // Multiple
+    void* pB1 = sralloc_alloc( allocator, 100 );
+    void* pB2 = sralloc_alloc( allocator, 1000 );
+    lequal( allocator->stats.num_allocations, 2 );
+    sralloc_dealloc( allocator, pB2 );
+    lequal( allocator->stats.num_allocations, 1 );
+    sralloc_dealloc( allocator, pB1 );
+    lequal( allocator->stats.num_allocations, 0 );
+    lequal( allocator->stats.amount_allocated, 0 );
+
+    // Aligned
+    void* psC[10];
+    for ( int i = 0; i < 10; i++ ) {
+        psC[i] = sralloc_alloc_aligned( allocator, i * 7 + 100, 16 );
+    }
+    lequal( allocator->stats.num_allocations, 10 );
+    for ( int i = 0; i < 10; i++ ) {
+        sralloc_dealloc( allocator, psC[i] );
+    }
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
 }
