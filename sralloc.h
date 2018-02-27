@@ -35,7 +35,7 @@ typedef uintptr_t sruintptr_t;
 typedef struct {
     void*   ptr;
     srint_t size;
-    srint_t offset;
+    // srint_t offset;
 } sr_result_t;
 
 #if defined( SRALLOC_STATIC )
