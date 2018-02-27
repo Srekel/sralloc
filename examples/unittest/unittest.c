@@ -27,7 +27,7 @@
 #endif
 
 #ifdef SRALLOC_DISABLE_STATS
-#define lequal(...)
+#define lequal( ... )
 #endif
 
 void
@@ -74,13 +74,38 @@ malloc_test( void ) {
 
 void
 stack_test( void ) {
-    srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
-    srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 2000 );
-    generic_allocator_tests( stackalloc );
-    sralloc_destroy_stack_allocator( stackalloc );
-    lequal( mallocalloc->stats.num_allocations, 0 );
-    lequal( mallocalloc->stats.amount_allocated, 0 );
-    sralloc_destroy_malloc_allocator( mallocalloc );
+    {
+        srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
+        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 2000 );
+        generic_allocator_tests( stackalloc );
+        sralloc_destroy_stack_allocator( stackalloc );
+        lequal( mallocalloc->stats.num_allocations, 0 );
+        lequal( mallocalloc->stats.amount_allocated, 0 );
+        sralloc_destroy_malloc_allocator( mallocalloc );
+    }
+    {
+        srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
+        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 2000 );
+        int*           pA1         = SRALLOC_OBJECT( stackalloc, int );
+        *pA1                       = 111;
+        sralloc_stack_allocator_push_state( stackalloc );
+        void* pA2 = SRALLOC_BYTES( stackalloc, 100 );
+        (void)pA2;
+        sralloc_stack_allocator_pop_state( stackalloc );
+        lequal( stackalloc->stats.num_allocations, 1 );
+        int* pA3 = SRALLOC_OBJECT( stackalloc, int );
+        *pA3     = 333;
+        lequal( *pA1, 111 );
+        *pA1 = 111;
+        lequal( *pA3, 333 );
+        SRALLOC_DEALLOC( stackalloc, pA3 );
+        SRALLOC_DEALLOC( stackalloc, pA1 );
+        lequal( stackalloc->stats.num_allocations, 0 );
+        sralloc_destroy_stack_allocator( stackalloc );
+        lequal( mallocalloc->stats.num_allocations, 0 );
+        lequal( mallocalloc->stats.amount_allocated, 0 );
+        sralloc_destroy_malloc_allocator( mallocalloc );
+    }
 }
 
 int
