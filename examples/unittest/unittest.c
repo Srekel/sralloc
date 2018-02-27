@@ -108,11 +108,30 @@ stack_test( void ) {
     }
 }
 
+void
+proxy_test( void ) {
+    srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
+    srallocator_t* proxyalloc1 = sralloc_create_proxy_allocator( "proxy1", mallocalloc );
+    srallocator_t* proxyalloc2 = sralloc_create_proxy_allocator( "proxy2", mallocalloc );
+    generic_allocator_tests( proxyalloc1 );
+    generic_allocator_tests( proxyalloc2 );
+    srallocator_t* proxyalloc3 = sralloc_create_proxy_allocator( "proxy3", proxyalloc2 );
+    lequal( proxyalloc2->stats.num_allocations, 1 );
+    generic_allocator_tests( proxyalloc3 );
+    sralloc_destroy_proxy_allocator( proxyalloc3 );
+    sralloc_destroy_proxy_allocator( proxyalloc1 );
+    sralloc_destroy_proxy_allocator( proxyalloc2 );
+    lequal( mallocalloc->stats.num_allocations, 0 );
+    lequal( mallocalloc->stats.amount_allocated, 0 );
+    sralloc_destroy_malloc_allocator( mallocalloc );
+}
+
 int
 main( void ) {
 
     lrun( "malloc_allocator", malloc_test );
     lrun( "stack_allocator", stack_test );
+    lrun( "proxy_allocator", proxy_test );
 
     lresults();
 

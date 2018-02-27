@@ -35,6 +35,7 @@ typedef uintptr_t sruintptr_t;
 typedef struct {
     void*   ptr;
     srint_t size;
+    srint_t offset;
 } sr_result_t;
 
 #if defined( SRALLOC_STATIC )
@@ -227,10 +228,10 @@ sr__remove_child_allocator( srallocator_t* parent, srallocator_t* child ) {
                 else {
                     sralloc_dealloc( parent, parent->children );
                 }
-            }
 
-            parent->children          = SRALLOC_NULL;
-            parent->children_capacity = 0;
+                parent->children          = SRALLOC_NULL;
+                parent->children_capacity = 0;
+            }
 
             return;
         }
@@ -505,21 +506,21 @@ sralloc_stack_allocator_pop_state( srallocator_t* allocator ) {
 }
 
 SRALLOC_API srallocator_t*
-            sralloc_create_stack_allocator( const char* name, srallocator_t* backing, srint_t capacity ) {
+            sralloc_create_stack_allocator( const char* name, srallocator_t* parent, srint_t capacity ) {
     srint_t allocator_size = sizeof( srallocator_t ) + sizeof( srallocator_stack_t ) + capacity;
-    void*   memory         = sralloc_alloc( backing, allocator_size );
+    void*   memory         = sralloc_alloc( parent, allocator_size );
     srallocator_t*       allocator       = (srallocator_t*)memory;
     srallocator_stack_t* stack_allocator = (srallocator_stack_t*)( allocator + 1 );
 
     SRALLOC_memset( allocator, 0, allocator_size );
-    sr__add_child_allocator( backing, allocator );
+    sr__add_child_allocator( parent, allocator );
     sr__set_name( allocator, name );
     allocator->allocate_func           = sralloc_stack_allocate;
     allocator->deallocate_func         = sralloc_stack_deallocate;
     stack_allocator->top               = stack_allocator + 1;
     stack_allocator->end               = ( (char*)stack_allocator->top ) + capacity;
     stack_allocator->num_states        = 0;
-    stack_allocator->backing_allocator = backing;
+    stack_allocator->backing_allocator = parent;
     return allocator;
 }
 
@@ -538,87 +539,183 @@ sralloc_destroy_stack_allocator( srallocator_t* allocator ) {
     sralloc_dealloc( stack_allocator->backing_allocator, allocator );
 }
 
-    // ███████╗██╗      ██████╗ ████████╗
-    // ██╔════╝██║     ██╔═══██╗╚══██╔══╝
-    // ███████╗██║     ██║   ██║   ██║
-    // ╚════██║██║     ██║   ██║   ██║
-    // ███████║███████╗╚██████╔╝   ██║
-    // ╚══════╝╚══════╝ ╚═════╝    ╚═╝
-    /*
-    typedef struct {
+// ██████╗ ██████╗  ██████╗ ██╗  ██╗██╗   ██╗
+// ██╔══██╗██╔══██╗██╔═══██╗╚██╗██╔╝╚██╗ ██╔╝
+// ██████╔╝██████╔╝██║   ██║ ╚███╔╝  ╚████╔╝
+// ██╔═══╝ ██╔══██╗██║   ██║ ██╔██╗   ╚██╔╝
+// ██║     ██║  ██║╚██████╔╝██╔╝ ██╗   ██║
+// ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝
 
-    } srallocator_slot_t;
+typedef struct {
+    srallocator_t* backing_allocator;
+} srallocator_proxy_t;
 
-    void*
-    sralloc_slot_allocate( srallocator_t* allocator, srint_t size ) {
-        srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
-        srshort_t           slot           = slot_allocator->free_slot;
-        if ( slot_allocator->free_slot != 0 ) {
-            srshort_t next_slot_offset = slot * slot_allocator->slot_size;
-            char*     next_free_slot   = (char*)slot_allocator->slots + next_slot_offset;
-            slot_allocator->free_slot  = *(srshort_t*)next_free_slot;
-        }
-        else {
-            SRALLOC_assert( slot_allocator->num_slots < slot_allocator->capacity );
-            slot = slot_allocator->num_slots++;
-        }
+typedef struct {
+    srint_t size;
+    srint_t offset;
+} sralloc_proxy_preamble_t;
 
-        allocator->stats.amount_allocated += size;
-        allocator->stats.num_allocations++;
+static sr_result_t
+sralloc_proxy_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+    SRALLOC_UNUSED( allocator );
+    srint_t preamble_size = sizeof( sralloc_proxy_preamble_t );
+    size += align;
+    size += preamble_size;
 
-        srshort_t slot_offset = slot * slot_allocator->slot_size;
-        char*     slot        = (char*)slot_allocator->slots + next_slot_offset;
-        void*     ptr         = (void*)slot;
-        return ptr;
+#ifdef SRALLOC_USE_STATS
+    allocator->stats.amount_allocated += size;
+    allocator->stats.num_allocations++;
+#endif
+
+    srallocator_proxy_t* proxy_allocator = (srallocator_proxy_t*)( allocator + 1 );
+    srchar_t*            unaligned_ptr = SRALLOC_BYTES( proxy_allocator->backing_allocator, size );
+    if ( unaligned_ptr == SRALLOC_NULL ) {
+        sr_result_t res = { SRALLOC_NULL, 0 };
+        return res;
     }
 
-    void
-    sralloc_slot_deallocate( srallocator_t* allocator, void* ptr ) {
-        srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
-        srint_t*            slot_ptr       = (srint_t*)ptr;
-        if ( slot_allocator->free_slot == 0 ) {
-        slot_allocator->free_slot = (slot_ptr - slot_allocator->slots;
-        }
+    srchar_t* ptr = sr__aligned_ptr_after_preamble( unaligned_ptr, preamble_size, align );
+    sralloc_proxy_preamble_t* preamble = (sralloc_proxy_preamble_t*)ptr - 1;
+    preamble->size                     = size;
+    preamble->offset                   = sr__ptr_diff( preamble, unaligned_ptr );
 
-        slot_ptr--;
-        allocator->stats.amount_allocated -= *slot_ptr;
-        allocator->stats.num_allocations--;
-        return free( slot_ptr );
+    sr_result_t res;
+    res.ptr  = (void*)ptr;
+    res.size = size;
+    return res;
+}
+
+static void
+sralloc_proxy_deallocate( srallocator_t* allocator, void* ptr ) {
+    SRALLOC_UNUSED( allocator );
+    sralloc_proxy_preamble_t* preamble      = (sralloc_proxy_preamble_t*)ptr - 1;
+    srchar_t*                 unaligned_ptr = (srchar_t*)preamble - preamble->offset;
+#ifdef SRALLOC_USE_STATS
+    allocator->stats.amount_allocated -= preamble->size;
+    allocator->stats.num_allocations--;
+#endif
+    srallocator_proxy_t* proxy_allocator = (srallocator_proxy_t*)( allocator + 1 );
+    SRALLOC_DEALLOC( proxy_allocator->backing_allocator, unaligned_ptr );
+}
+
+SRALLOC_API srallocator_t*
+            sralloc_create_proxy_allocator( const char* name, srallocator_t* parent ) {
+#ifdef SRALLOC_DISABLE_PROXY
+    return parent;
+#endif
+
+    srint_t              allocator_size  = sizeof( srallocator_t ) + sizeof( srallocator_proxy_t );
+    void*                memory          = sralloc_alloc( parent, allocator_size );
+    srallocator_t*       allocator       = (srallocator_t*)memory;
+    srallocator_proxy_t* proxy_allocator = (srallocator_proxy_t*)( allocator + 1 );
+
+    SRALLOC_memset( allocator, 0, allocator_size );
+    sr__add_child_allocator( parent, allocator );
+    sr__set_name( allocator, name );
+    allocator->allocate_func           = sralloc_proxy_allocate;
+    allocator->deallocate_func         = sralloc_proxy_deallocate;
+    proxy_allocator->backing_allocator = parent;
+
+    return allocator;
+}
+
+SRALLOC_API void
+sralloc_destroy_proxy_allocator( srallocator_t* allocator ) {
+#ifdef SRALLOC_DISABLE_PROXY
+    return;
+#endif
+#ifdef SRALLOC_USE_STATS
+    sr__remove_child_allocator( allocator->parent, allocator );
+    SRALLOC_assert( allocator->num_children == 0 );
+    SRALLOC_assert( allocator->stats.num_allocations == 0 );
+    SRALLOC_assert( allocator->stats.amount_allocated == 0 );
+#endif
+    srallocator_proxy_t* proxy_allocator = (srallocator_proxy_t*)( allocator + 1 );
+    SRALLOC_DEALLOC( proxy_allocator->backing_allocator, allocator );
+}
+
+// ███████╗██╗      ██████╗ ████████╗
+// ██╔════╝██║     ██╔═══██╗╚══██╔══╝
+// ███████╗██║     ██║   ██║   ██║
+// ╚════██║██║     ██║   ██║   ██║
+// ███████║███████╗╚██████╔╝   ██║
+// ╚══════╝╚══════╝ ╚═════╝    ╚═╝
+/*
+typedef struct {
+
+} srallocator_slot_t;
+
+void*
+sralloc_slot_allocate( srallocator_t* allocator, srint_t size ) {
+    srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+    srshort_t           slot           = slot_allocator->free_slot;
+    if ( slot_allocator->free_slot != 0 ) {
+        srshort_t next_slot_offset = slot * slot_allocator->slot_size;
+        char*     next_free_slot   = (char*)slot_allocator->slots + next_slot_offset;
+        slot_allocator->free_slot  = *(srshort_t*)next_free_slot;
+    }
+    else {
+        SRALLOC_assert( slot_allocator->num_slots < slot_allocator->capacity );
+        slot = slot_allocator->num_slots++;
     }
 
-    SRALLOC_API srallocator_t*
-                sralloc_create_slot_allocator( srallocator_t* parent,
-                                               const char*    name,
-                                               srint_t        slot_size,
-                                               srint_t        capacity ) {
+    allocator->stats.amount_allocated += size;
+    allocator->stats.num_allocations++;
 
-        srint_t allocator_size =
-          sizeof( srallocator_t ) + sizeof( srallocator_slot_t ) + slot_size * capacity;
-        srallocator_t*      allocator      = parent->allocate( parent, allocator_size );
-        srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+    srshort_t slot_offset = slot * slot_allocator->slot_size;
+    char*     slot        = (char*)slot_allocator->slots + next_slot_offset;
+    void*     ptr         = (void*)slot;
+    return ptr;
+}
 
-        SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
-        allocator->name           = name;
-        allocator->parent         = parent;
-        allocator->allocate       = sralloc_slot_allocate;
-        allocator->deallocate     = sralloc_slot_deallocate;
-        slot_allocator->num_slots = 0;
-        slot_allocator->capacity  = capacity;
-        slot_allocator->slot_size = slot_size;
-        slot_allocator->slots     = (void*)slot_allocator + 1;
-        return allocator;
-    };
+void
+sralloc_slot_deallocate( srallocator_t* allocator, void* ptr ) {
+    srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+    srint_t*            slot_ptr       = (srint_t*)ptr;
+    if ( slot_allocator->free_slot == 0 ) {
+    slot_allocator->free_slot = (slot_ptr - slot_allocator->slots;
+    }
 
-    SRALLOC_API void
-    sralloc_destroy_slot_allocator( srallocator_t* allocator ) {
-        SRALLOC_assert( allocator->num_children == 0 );
-        SRALLOC_assert( allocator->stats.num_allocations == 0 );
-        SRALLOC_assert( allocator->stats.amount_allocated == 0 );
-        allocator->parent->deallocate( allocator->parent, allocator );
-    };
+    slot_ptr--;
+    allocator->stats.amount_allocated -= *slot_ptr;
+    allocator->stats.num_allocations--;
+    return free( slot_ptr );
+}
 
-    END OF SLOT
-    */
+SRALLOC_API srallocator_t*
+            sralloc_create_slot_allocator( srallocator_t* parent,
+                                           const char*    name,
+                                           srint_t        slot_size,
+                                           srint_t        capacity ) {
+
+    srint_t allocator_size =
+      sizeof( srallocator_t ) + sizeof( srallocator_slot_t ) + slot_size * capacity;
+    srallocator_t*      allocator      = parent->allocate( parent, allocator_size );
+    srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
+
+    SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
+    allocator->name           = name;
+    allocator->parent         = parent;
+    allocator->allocate       = sralloc_slot_allocate;
+    allocator->deallocate     = sralloc_slot_deallocate;
+    slot_allocator->num_slots = 0;
+    slot_allocator->capacity  = capacity;
+    slot_allocator->slot_size = slot_size;
+    slot_allocator->slots     = (void*)slot_allocator + 1;
+    return allocator;
+};
+
+SRALLOC_API void
+sralloc_destroy_slot_allocator( srallocator_t* allocator ) {
+    SRALLOC_assert( allocator->num_children == 0 );
+    SRALLOC_assert( allocator->stats.num_allocations == 0 );
+    SRALLOC_assert( allocator->stats.amount_allocated == 0 );
+    allocator->parent->deallocate( allocator->parent, allocator );
+};
+
+END OF SLOT
+*/
+
 
     // ██████╗ ██████╗ ██╗ ██████╗ ██████╗ ██╗████████╗██╗   ██╗
     // ██╔══██╗██╔══██╗██║██╔═══██╗██╔══██╗██║╚══██╔══╝╚██╗ ██╔╝
