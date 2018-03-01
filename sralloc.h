@@ -26,10 +26,11 @@ typedef struct srallocator srallocator_t;
 
 #ifndef SRALLOC_TYPES
 #include <stdint.h>
-typedef char      srchar_t;
-typedef int       srint_t;
-typedef short     srshort_t;
-typedef uintptr_t sruintptr_t;
+typedef char         srchar_t;
+typedef int          srint_t;
+typedef unsigned int sruint_t;
+typedef short        srshort_t;
+typedef uintptr_t    sruintptr_t;
 #endif
 
 typedef struct {
@@ -62,6 +63,11 @@ SRALLOC_API void           sralloc_destroy_malloc_allocator( srallocator_t* allo
 SRALLOC_API      srallocator_t*
                  sralloc_create_stack_allocator( const char* name, srallocator_t* parent, srint_t capacity );
 SRALLOC_API void sralloc_destroy_stack_allocator( srallocator_t* allocator );
+
+// Proxy allocator (for categorizing/structuring)
+SRALLOC_API srallocator_t* sralloc_create_proxy_allocator( const char*    name,
+                                                           srallocator_t* parent );
+SRALLOC_API void           sralloc_destroy_proxy_allocator( srallocator_t* allocator );
 
 // Slot allocator (for things of same size)
 SRALLOC_API srallocator_t* sralloc_create_slot_allocator( srallocator_t* parent,
@@ -117,10 +123,6 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #define SRALLOC_memcpy memcpy
 #endif
 
-#ifndef SRALLOC_PAGE_SIZE
-#define SRALLOC_PAGE_SIZE 0x1000
-#endif
-
 #ifndef SRALLOC_NULL
 #define SRALLOC_NULL 0
 #endif
@@ -138,7 +140,7 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #define SRALLOC_DEALLOCATION_PATTERN 0xcd
 #endif
 #define SRALLOC_WRITE_DEALLOCATION_PATTERN( ptr, size ) \
-    SRALLOC_memcpy( ptr, SRALLOC_DEALLOCATION_PATTERN, size )
+    SRALLOC_memset( ptr, SRALLOC_DEALLOCATION_PATTERN, size )
 #else
 #define SRALLOC_WRITE_DEALLOCATION_PATTERN( ptr, size )
 #endif
@@ -150,6 +152,34 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #ifndef SRALLOC_DISABLE_NAMES
 #define SRALLOC_USE_NAMES
 #endif
+
+// #ifndef SRALLOC_DISABLE_TYPES
+// #define SRALLOC_USE_TYPES
+// #endif
+
+// End of page allocator config
+#ifndef SRALLOC_PAGE_SIZE
+#define SRALLOC_PAGE_SIZE 0x1000
+#endif
+
+#ifndef SRALLOC_PROTECT_MEMORY
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+typedef DWORD srmemflag_t;
+#define SRALLOC_MEMPROTECT_FLAG PAGE_NOACCESS
+#define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
+    VirtualProtect( ptr, size, protection, old_protection );
+#elif defined( __linux__ )
+#include <sys/mman.h>
+typedef int srmemflag_t;
+#define SRALLOC_MEMPROTECT_FLAG PROT_NONE
+#define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
+    mprotect( ptr, size, protection )
+#else
+#define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection )
+#endif // _WIN32
+#endif // SRALLOC_PROTECT_MEMORY
 
 typedef struct {
     int num_allocations;
@@ -163,8 +193,11 @@ typedef void ( *sralloc_deallocate_func )( srallocator_t* allocator, void* ptr )
 
 struct srallocator {
 #ifdef SRALLOC_USE_NAMES
-    const char* name;
+    const char* name; // TODO arrayify
 #endif
+    // #ifdef SRALLOC_USE_TYPES
+    //     char type[16];
+    // #endif
     sralloc_allocate_func   allocate_func;
     sralloc_deallocate_func deallocate_func;
 #ifdef SRALLOC_USE_STATS
@@ -253,8 +286,20 @@ sr__set_name( srallocator_t* allocator, const srchar_t* name ) {
 #endif
 }
 
+// static void
+// sr__set_type( srallocator_t* allocator, const srchar_t* name ) {
+//     SRALLOC_UNUSED( allocator, name );
+// #ifdef SRALLOC_USE_NAMES
+//     SRALLOC_memcpy( allocator->name, SRALLOC_strlen( name ), name );
+// #endif
+// }
+
 static void*
 sr__ptr_to_aligned_ptr( void* ptr, srint_t align ) {
+    if ( align == 0 ) {
+        return ptr;
+    }
+
     sruintptr_t offset      = ( ~(sruintptr_t)ptr + 1 ) & ( align - 1 );
     void*       aligned_ptr = (srchar_t*)ptr + offset;
     return aligned_ptr;
@@ -263,12 +308,7 @@ sr__ptr_to_aligned_ptr( void* ptr, srint_t align ) {
 static srchar_t*
 sr__aligned_ptr_after_preamble( void* ptr, srint_t preamble_size, srint_t align ) {
     srchar_t* after_preamble = (srchar_t*)ptr + preamble_size;
-    if ( align == 0 ) {
-        return after_preamble;
-    }
-    else {
-        return sr__ptr_to_aligned_ptr( after_preamble, align );
-    }
+    return sr__ptr_to_aligned_ptr( after_preamble, align );
 }
 
 static srint_t
@@ -347,9 +387,10 @@ typedef struct {
 } sralloc_malloc_preamble_t;
 
 static sr_result_t
-sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+sralloc_malloc_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     SRALLOC_UNUSED( allocator );
     srint_t preamble_size = sizeof( sralloc_malloc_preamble_t );
+    srint_t size          = wanted_size;
     size += align;
     size += preamble_size;
 
@@ -371,7 +412,7 @@ sralloc_malloc_allocate( srallocator_t* allocator, srint_t size, srint_t align )
 
     sr_result_t res;
     res.ptr  = (void*)ptr;
-    res.size = size;
+    res.size = wanted_size;
     return res;
 }
 
@@ -392,6 +433,7 @@ SRALLOC_API srallocator_t*
     srallocator_t* allocator = (srallocator_t*)SRALLOC_malloc( sizeof( srallocator_t ) );
     SRALLOC_memset( allocator, 0, sizeof( srallocator_t ) );
     sr__set_name( allocator, name );
+    // sr__set_type( allocator, "malloc" );
     allocator->allocate_func   = sralloc_malloc_allocate;
     allocator->deallocate_func = sralloc_malloc_deallocate;
     return allocator;
@@ -435,8 +477,9 @@ typedef struct {
 } srallocator_stack_t;
 
 static sr_result_t
-sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+sralloc_stack_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     srint_t preamble_size = sizeof( sralloc_stack_preamble_t );
+    srint_t size = wanted_size;
     size += align;
     size += preamble_size;
 
@@ -459,7 +502,7 @@ sralloc_stack_allocate( srallocator_t* allocator, srint_t size, srint_t align ) 
     stack_allocator->top                = ptr + size;
     sr_result_t res;
     res.ptr  = (void*)( ptr );
-    res.size = size;
+    res.size = wanted_size;
     return res;
 }
 
@@ -560,9 +603,10 @@ typedef struct {
 } sralloc_proxy_preamble_t;
 
 static sr_result_t
-sralloc_proxy_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+sralloc_proxy_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     SRALLOC_UNUSED( allocator );
     srint_t preamble_size = sizeof( sralloc_proxy_preamble_t );
+    srint_t size = wanted_size;
     size += align;
     size += preamble_size;
 
@@ -585,7 +629,7 @@ sralloc_proxy_allocate( srallocator_t* allocator, srint_t size, srint_t align ) 
 
     sr_result_t res;
     res.ptr  = (void*)ptr;
-    res.size = size;
+    res.size = wanted_size;
     return res;
 }
 
@@ -650,38 +694,51 @@ typedef struct {
 } srallocator_end_of_page_t;
 
 typedef struct {
-    srint_t size;
-    srint_t offset;
+    srint_t     size;
+    srint_t     offset;
+    srmemflag_t initial_protection;
+    srchar_t*   page_ptr;
 } sralloc_end_of_page_preamble_t;
 
 static sr_result_t
-sralloc_end_of_page_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+sralloc_end_of_page_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     SRALLOC_UNUSED( allocator );
-    srint_t preamble_size = sizeof( sralloc_end_of_page_preamble_t );
-    size += align;
-    size += preamble_size;
+    srint_t preamble_size    = sizeof( sralloc_end_of_page_preamble_t );
+    srint_t size_to_allocate = wanted_size;
+    size_to_allocate += align;
+    size_to_allocate += preamble_size;
+    size_to_allocate += SRALLOC_PAGE_SIZE * 2;
 
 #ifdef SRALLOC_USE_STATS
-    allocator->stats.amount_allocated += size;
+    allocator->stats.amount_allocated += size_to_allocate;
     allocator->stats.num_allocations++;
 #endif
 
     srallocator_end_of_page_t* end_of_page_allocator =
       (srallocator_end_of_page_t*)( allocator + 1 );
-    srchar_t* unaligned_ptr = SRALLOC_BYTES( end_of_page_allocator->backing_allocator, size );
+    srchar_t* unaligned_ptr =
+      SRALLOC_BYTES( end_of_page_allocator->backing_allocator, size_to_allocate );
     if ( unaligned_ptr == SRALLOC_NULL ) {
         sr_result_t res = { SRALLOC_NULL, 0 };
         return res;
     }
 
-    srchar_t* ptr = sr__aligned_ptr_after_preamble( unaligned_ptr, preamble_size, align );
+    srchar_t* page_ptr = sr__ptr_to_aligned_ptr(
+      unaligned_ptr + wanted_size + align + preamble_size, SRALLOC_PAGE_SIZE );
+
+    srchar_t*                       ptr      = page_ptr - wanted_size - align;
     sralloc_end_of_page_preamble_t* preamble = (sralloc_end_of_page_preamble_t*)ptr - 1;
-    preamble->size                           = size;
+    preamble->size                           = size_to_allocate;
     preamble->offset                         = sr__ptr_diff( preamble, unaligned_ptr );
+    preamble->page_ptr                       = page_ptr;
+
+    // SRALLOC_assert( sr__ptr_to_aligned_ptr( ptr, align ) == ptr );
+    SRALLOC_PROTECT_MEMORY(
+      page_ptr, SRALLOC_PAGE_SIZE, SRALLOC_MEMPROTECT_FLAG, &preamble->initial_protection );
 
     sr_result_t res;
     res.ptr  = (void*)ptr;
-    res.size = size;
+    res.size = wanted_size;
     return res;
 }
 
@@ -694,6 +751,11 @@ sralloc_end_of_page_deallocate( srallocator_t* allocator, void* ptr ) {
     allocator->stats.amount_allocated -= preamble->size;
     allocator->stats.num_allocations--;
 #endif
+    srchar_t*   page_ptr = preamble->page_ptr;
+    srmemflag_t current_protection;
+    SRALLOC_PROTECT_MEMORY(
+      page_ptr, SRALLOC_PAGE_SIZE, preamble->initial_protection, &current_protection );
+
     srallocator_end_of_page_t* end_of_page_allocator =
       (srallocator_end_of_page_t*)( allocator + 1 );
     SRALLOC_DEALLOC( end_of_page_allocator->backing_allocator, unaligned_ptr );
@@ -723,9 +785,6 @@ SRALLOC_API srallocator_t*
 
 SRALLOC_API void
 sralloc_destroy_end_of_page_allocator( srallocator_t* allocator ) {
-#ifdef SRALLOC_DISABLE_end_of_page
-    return;
-#endif
 #ifdef SRALLOC_USE_STATS
     sr__remove_child_allocator( allocator->parent, allocator );
     SRALLOC_assert( allocator->num_children == 0 );

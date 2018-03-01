@@ -1,4 +1,11 @@
 
+#ifdef _WIN32
+#pragma warning( push, 0 )
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#pragma warning( pop )
+#endif
+
 #define SRALLOC_IMPLEMENTATION
 // #define SRALLOC_DISABLE_NAMES
 // #define SRALLOC_DISABLE_STATS
@@ -17,12 +24,6 @@
 
 #include "../external/minctest/minctest.h"
 #ifdef _MSC_VER
-#pragma warning( pop )
-#endif
-
-#ifdef _MSC_VER
-#pragma warning( push, 0 )
-#include <Windows.h>
 #pragma warning( pop )
 #endif
 
@@ -63,6 +64,21 @@ generic_allocator_tests( srallocator_t* allocator ) {
     }
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
+
+    // Test returned size
+    sr_result_t psD[10];
+    for ( int i = 0; i < 10; i++ ) {
+        psD[i] = sralloc_alloc_aligned_with_size( allocator, i * 7 + 100, 16 );
+    }
+    for ( int i = 0; i < 10; i++ ) {
+        memset( psD[i].ptr, i + 150, psD[i].size );
+    }
+    lequal( allocator->stats.num_allocations, 10 );
+    for ( int i = 0; i < 10; i++ ) {
+        sralloc_dealloc( allocator, psD[i].ptr );
+    }
+    lequal( allocator->stats.num_allocations, 0 );
+    lequal( allocator->stats.amount_allocated, 0 );
 }
 
 void
@@ -76,7 +92,7 @@ void
 stack_test( void ) {
     {
         srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
-        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 2000 );
+        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 20000 );
         generic_allocator_tests( stackalloc );
         sralloc_destroy_stack_allocator( stackalloc );
         lequal( mallocalloc->stats.num_allocations, 0 );
@@ -85,7 +101,7 @@ stack_test( void ) {
     }
     {
         srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
-        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 2000 );
+        srallocator_t* stackalloc  = sralloc_create_stack_allocator( "stack", mallocalloc, 20000 );
         int*           pA1         = SRALLOC_OBJECT( stackalloc, int );
         *pA1                       = 111;
         sralloc_stack_allocator_push_state( stackalloc );
@@ -126,12 +142,30 @@ proxy_test( void ) {
     sralloc_destroy_malloc_allocator( mallocalloc );
 }
 
+void
+end_of_page_test( void ) {
+    srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
+    srallocator_t* eopalloc    = sralloc_create_end_of_page_allocator( "eop1", mallocalloc );
+    generic_allocator_tests( eopalloc );
+    char* pA1 = SRALLOC_BYTES( eopalloc, 100 );
+    // for ( int i = 0; i < 1000; ++i ) {
+    //     char c = pA1[i];
+    //     pA1[i] = c + 1;
+    // }
+    SRALLOC_DEALLOC( eopalloc, pA1 );
+    sralloc_destroy_end_of_page_allocator( eopalloc );
+    lequal( mallocalloc->stats.num_allocations, 0 );
+    lequal( mallocalloc->stats.amount_allocated, 0 );
+    sralloc_destroy_malloc_allocator( mallocalloc );
+}
+
 int
 main( void ) {
 
     lrun( "malloc_allocator", malloc_test );
     lrun( "stack_allocator", stack_test );
     lrun( "proxy_allocator", proxy_test );
+    lrun( "end_of_page_allocator", end_of_page_test );
 
     lresults();
 
