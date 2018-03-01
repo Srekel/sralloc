@@ -117,6 +117,10 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #define SRALLOC_memcpy memcpy
 #endif
 
+#ifndef SRALLOC_PAGE_SIZE
+#define SRALLOC_PAGE_SIZE 0x1000
+#endif
+
 #ifndef SRALLOC_NULL
 #define SRALLOC_NULL 0
 #endif
@@ -634,13 +638,114 @@ sralloc_destroy_proxy_allocator( srallocator_t* allocator ) {
     SRALLOC_DEALLOC( proxy_allocator->backing_allocator, allocator );
 }
 
+// ███████╗███╗   ██╗██████╗          ██████╗ ███████╗   ██████╗  █████╗  ██████╗ ███████╗
+// ██╔════╝████╗  ██║██╔══██╗        ██╔═══██╗██╔════╝   ██╔══██╗██╔══██╗██╔════╝ ██╔════╝
+// █████╗  ██╔██╗ ██║██║  ██║        ██║   ██║█████╗     ██████╔╝███████║██║  ███╗█████╗
+// ██╔══╝  ██║╚██╗██║██║  ██║        ██║   ██║██╔══╝     ██╔═══╝ ██╔══██║██║   ██║██╔══╝
+// ███████╗██║ ╚████║██████╔╝███████╗╚██████╔╝██║███████╗██║     ██║  ██║╚██████╔╝███████╗
+// ╚══════╝╚═╝  ╚═══╝╚═════╝ ╚══════╝ ╚═════╝ ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+
+typedef struct {
+    srallocator_t* backing_allocator;
+} srallocator_end_of_page_t;
+
+typedef struct {
+    srint_t size;
+    srint_t offset;
+} sralloc_end_of_page_preamble_t;
+
+static sr_result_t
+sralloc_end_of_page_allocate( srallocator_t* allocator, srint_t size, srint_t align ) {
+    SRALLOC_UNUSED( allocator );
+    srint_t preamble_size = sizeof( sralloc_end_of_page_preamble_t );
+    size += align;
+    size += preamble_size;
+
+#ifdef SRALLOC_USE_STATS
+    allocator->stats.amount_allocated += size;
+    allocator->stats.num_allocations++;
+#endif
+
+    srallocator_end_of_page_t* end_of_page_allocator =
+      (srallocator_end_of_page_t*)( allocator + 1 );
+    srchar_t* unaligned_ptr = SRALLOC_BYTES( end_of_page_allocator->backing_allocator, size );
+    if ( unaligned_ptr == SRALLOC_NULL ) {
+        sr_result_t res = { SRALLOC_NULL, 0 };
+        return res;
+    }
+
+    srchar_t* ptr = sr__aligned_ptr_after_preamble( unaligned_ptr, preamble_size, align );
+    sralloc_end_of_page_preamble_t* preamble = (sralloc_end_of_page_preamble_t*)ptr - 1;
+    preamble->size                           = size;
+    preamble->offset                         = sr__ptr_diff( preamble, unaligned_ptr );
+
+    sr_result_t res;
+    res.ptr  = (void*)ptr;
+    res.size = size;
+    return res;
+}
+
+static void
+sralloc_end_of_page_deallocate( srallocator_t* allocator, void* ptr ) {
+    SRALLOC_UNUSED( allocator );
+    sralloc_end_of_page_preamble_t* preamble      = (sralloc_end_of_page_preamble_t*)ptr - 1;
+    srchar_t*                       unaligned_ptr = (srchar_t*)preamble - preamble->offset;
+#ifdef SRALLOC_USE_STATS
+    allocator->stats.amount_allocated -= preamble->size;
+    allocator->stats.num_allocations--;
+#endif
+    srallocator_end_of_page_t* end_of_page_allocator =
+      (srallocator_end_of_page_t*)( allocator + 1 );
+    SRALLOC_DEALLOC( end_of_page_allocator->backing_allocator, unaligned_ptr );
+}
+
+SRALLOC_API srallocator_t*
+            sralloc_create_end_of_page_allocator( const char* name, srallocator_t* parent ) {
+#ifdef SRALLOC_DISABLE_end_of_page
+    return parent;
+#endif
+
+    srint_t        allocator_size = sizeof( srallocator_t ) + sizeof( srallocator_end_of_page_t );
+    void*          memory         = sralloc_alloc( parent, allocator_size );
+    srallocator_t* allocator      = (srallocator_t*)memory;
+    srallocator_end_of_page_t* end_of_page_allocator =
+      (srallocator_end_of_page_t*)( allocator + 1 );
+
+    SRALLOC_memset( allocator, 0, allocator_size );
+    sr__add_child_allocator( parent, allocator );
+    sr__set_name( allocator, name );
+    allocator->allocate_func                 = sralloc_end_of_page_allocate;
+    allocator->deallocate_func               = sralloc_end_of_page_deallocate;
+    end_of_page_allocator->backing_allocator = parent;
+
+    return allocator;
+}
+
+SRALLOC_API void
+sralloc_destroy_end_of_page_allocator( srallocator_t* allocator ) {
+#ifdef SRALLOC_DISABLE_end_of_page
+    return;
+#endif
+#ifdef SRALLOC_USE_STATS
+    sr__remove_child_allocator( allocator->parent, allocator );
+    SRALLOC_assert( allocator->num_children == 0 );
+    SRALLOC_assert( allocator->stats.num_allocations == 0 );
+    SRALLOC_assert( allocator->stats.amount_allocated == 0 );
+#endif
+    srallocator_end_of_page_t* end_of_page_allocator =
+      (srallocator_end_of_page_t*)( allocator + 1 );
+    SRALLOC_DEALLOC( end_of_page_allocator->backing_allocator, allocator );
+}
+
+/*
+
 // ███████╗██╗      ██████╗ ████████╗
 // ██╔════╝██║     ██╔═══██╗╚══██╔══╝
 // ███████╗██║     ██║   ██║   ██║
 // ╚════██║██║     ██║   ██║   ██║
 // ███████║███████╗╚██████╔╝   ██║
 // ╚══════╝╚══════╝ ╚═════╝    ╚═╝
-/*
+
 typedef struct {
 
 } srallocator_slot_t;
@@ -673,7 +778,7 @@ sralloc_slot_deallocate( srallocator_t* allocator, void* ptr ) {
     srallocator_slot_t* slot_allocator = (srallocator_slot_t*)( allocator + 1 );
     srint_t*            slot_ptr       = (srint_t*)ptr;
     if ( slot_allocator->free_slot == 0 ) {
-    slot_allocator->free_slot = (slot_ptr - slot_allocator->slots;
+        slot_allocator->free_slot = (slot_ptr - slot_allocator->slots;
     }
 
     slot_ptr--;
@@ -711,35 +816,9 @@ sralloc_destroy_slot_allocator( srallocator_t* allocator ) {
     SRALLOC_assert( allocator->stats.num_allocations == 0 );
     SRALLOC_assert( allocator->stats.amount_allocated == 0 );
     allocator->parent->deallocate( allocator->parent, allocator );
-};
-
+}
 END OF SLOT
 */
-
-
-    // ██████╗ ██████╗ ██╗ ██████╗ ██████╗ ██╗████████╗██╗   ██╗
-    // ██╔══██╗██╔══██╗██║██╔═══██╗██╔══██╗██║╚══██╔══╝╚██╗ ██╔╝
-    // ██████╔╝██████╔╝██║██║   ██║██████╔╝██║   ██║    ╚████╔╝
-    // ██╔═══╝ ██╔══██╗██║██║   ██║██╔══██╗██║   ██║     ╚██╔╝
-    // ██║     ██║  ██║██║╚██████╔╝██║  ██║██║   ██║      ██║
-    // ╚═╝     ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝   ╚═╝      ╚═╝
-
-    // ███████╗███╗   ██╗██████╗          ██████╗ ███████╗   ██████╗  █████╗  ██████╗ ███████╗
-    // ██╔════╝████╗  ██║██╔══██╗        ██╔═══██╗██╔════╝   ██╔══██╗██╔══██╗██╔════╝ ██╔════╝
-    // █████╗  ██╔██╗ ██║██║  ██║        ██║   ██║█████╗     ██████╔╝███████║██║  ███╗█████╗
-    // ██╔══╝  ██║╚██╗██║██║  ██║        ██║   ██║██╔══╝     ██╔═══╝ ██╔══██║██║   ██║██╔══╝
-    // ███████╗██║ ╚████║██████╔╝███████╗╚██████╔╝██║███████╗██║     ██║  ██║╚██████╔╝███████╗
-    // ╚══════╝╚═╝  ╚═══╝╚═════╝ ╚══════╝ ╚═════╝ ╚═╝╚══════╝╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝
-    //
-
-    // ███████╗███████╗██████╗  ██████╗
-    // ╚══███╔╝██╔════╝██╔══██╗██╔═══██╗
-    //   ███╔╝ █████╗  ██████╔╝██║   ██║
-    //  ███╔╝  ██╔══╝  ██╔══██╗██║   ██║
-    // ███████╗███████╗██║  ██║╚██████╔╝
-    // ╚══════╝╚══════╝╚═╝  ╚═╝ ╚═════╝
-    //
-
 #endif // SRALLOC_IMPLEMENTATION
 
 #if defined( __cplusplus ) && !defined( SRALLOC_NO_CLASSES )
