@@ -180,11 +180,11 @@ typedef DWORD srmemflag_t;
 typedef int srmemflag_t;
 #define SRALLOC_MEMPROTECT_FLAG PROT_NONE
 #define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
-    SRALLOC_UNUSED( old_protection )                                    \
-    mprotect( ptr, size, protection )
+    SRALLOC_UNUSED( old_protection );                                   \
+    mprotect( ptr, size, protection );
 #else
 #define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
-    SRALLOC_UNUSED( ptr, size, protection, old_protection )
+    SRALLOC_UNUSED( ptr, size, protection, old_protection );
 #endif // _WIN32
 #endif // SRALLOC_PROTECT_MEMORY
 
