@@ -163,21 +163,23 @@ SRALLOC_API void           sralloc_destroy_slot_allocator( srallocator_t* alloca
 #endif
 
 #ifndef SRALLOC_PROTECT_MEMORY
-#ifdef _WIN32
+#if defined( _WIN32 )
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 typedef DWORD srmemflag_t;
 #define SRALLOC_MEMPROTECT_FLAG PAGE_NOACCESS
 #define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
     VirtualProtect( ptr, size, protection, old_protection );
-#elif defined( __linux__ )
+#elif defined( __APPLE__ ) || defined( __linux__ )
 #include <sys/mman.h>
 typedef int srmemflag_t;
 #define SRALLOC_MEMPROTECT_FLAG PROT_NONE
 #define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
+    SRALLOC_UNUSED( old_protection )                                    \
     mprotect( ptr, size, protection )
 #else
-#define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection )
+#define SRALLOC_PROTECT_MEMORY( ptr, size, protection, old_protection ) \
+    SRALLOC_UNUSED( ptr, size, protection, old_protection )
 #endif // _WIN32
 #endif // SRALLOC_PROTECT_MEMORY
 
