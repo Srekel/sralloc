@@ -31,25 +31,42 @@
 #define lequal( ... )
 #endif
 
+sr_result_t
+unittest_alloc( srallocator_t* allocator, int size ) {
+    sr_result_t res = sralloc_alloc_with_size( allocator, size );
+    lequal( res.size, size ); // Not necessarily true but for now
+    memset( res.ptr, ( ( (sruintptr_t)res.ptr ) & 0xFF0 ) >> 8, res.size );
+    return res;
+}
+
+void
+unittest_dealloc( srallocator_t* allocator, sr_result_t res ) {
+    for ( int i = 0; i < res.size; ++i ) {
+        lequal( *( (char*)res.ptr + i ), (char)( ( ( (sruintptr_t)res.ptr ) & 0xFF0 ) >> 8 ) );
+    }
+
+    sralloc_dealloc( allocator, res.ptr );
+}
+
 void
 generic_allocator_tests( srallocator_t* allocator ) {
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
 
     // Single
-    void* pA1 = sralloc_alloc( allocator, 100 );
+    sr_result_t pA1 = unittest_alloc( allocator, 73 );
     lequal( allocator->stats.num_allocations, 1 );
-    sralloc_dealloc( allocator, pA1 );
+    unittest_dealloc( allocator, pA1 );
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
 
     // Multiple
-    void* pB1 = sralloc_alloc( allocator, 100 );
-    void* pB2 = sralloc_alloc( allocator, 1000 );
+    sr_result_t pB1 = unittest_alloc( allocator, 27 );
+    sr_result_t pB2 = unittest_alloc( allocator, 57 );
     lequal( allocator->stats.num_allocations, 2 );
-    sralloc_dealloc( allocator, pB2 );
+    unittest_dealloc( allocator, pB2 );
     lequal( allocator->stats.num_allocations, 1 );
-    sralloc_dealloc( allocator, pB1 );
+    unittest_dealloc( allocator, pB1 );
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
 
@@ -76,6 +93,18 @@ generic_allocator_tests( srallocator_t* allocator ) {
     lequal( allocator->stats.num_allocations, 10 );
     for ( int i = 0; i < 10; i++ ) {
         sralloc_dealloc( allocator, psD[i].ptr );
+    }
+    lequal( allocator->stats.num_allocations, 0 );
+    lequal( allocator->stats.amount_allocated, 0 );
+
+    // Test returned size 2
+    sr_result_t psE[10];
+    for ( int i = 0; i < 10; i++ ) {
+        psE[i] = unittest_alloc( allocator, i * 7 + 100 );
+    }
+    lequal( allocator->stats.num_allocations, 10 );
+    for ( int i = 0; i < 10; i++ ) {
+        unittest_dealloc( allocator, psE[i] );
     }
     lequal( allocator->stats.num_allocations, 0 );
     lequal( allocator->stats.amount_allocated, 0 );
@@ -147,12 +176,12 @@ end_of_page_test( void ) {
     srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
     srallocator_t* eopalloc    = sralloc_create_end_of_page_allocator( "eop1", mallocalloc );
     generic_allocator_tests( eopalloc );
-    char* pA1 = SRALLOC_BYTES( eopalloc, 100 );
+    sr_result_t pA1 = unittest_alloc( eopalloc, 100 );
     // for ( int i = 0; i < 1000; ++i ) {
     //     char c = pA1[i];
     //     pA1[i] = c + 1;
     // }
-    SRALLOC_DEALLOC( eopalloc, pA1 );
+    unittest_dealloc( eopalloc, pA1 );
     sralloc_destroy_end_of_page_allocator( eopalloc );
     lequal( mallocalloc->stats.num_allocations, 0 );
     lequal( mallocalloc->stats.amount_allocated, 0 );

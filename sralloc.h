@@ -69,6 +69,11 @@ SRALLOC_API srallocator_t* sralloc_create_proxy_allocator( const char*    name,
                                                            srallocator_t* parent );
 SRALLOC_API void           sralloc_destroy_proxy_allocator( srallocator_t* allocator );
 
+// End-of-page allocator (for debugging write-past-eob)
+SRALLOC_API srallocator_t* sralloc_create_end_of_page_allocator( const char*    name,
+                                                                 srallocator_t* parent );
+SRALLOC_API void           sralloc_destroy_end_of_page_allocator( srallocator_t* allocator );
+
 // Slot allocator (for things of same size)
 SRALLOC_API srallocator_t* sralloc_create_slot_allocator( srallocator_t* parent,
                                                           const char*    name,
@@ -481,7 +486,7 @@ typedef struct {
 static sr_result_t
 sralloc_stack_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     srint_t preamble_size = sizeof( sralloc_stack_preamble_t );
-    srint_t size = wanted_size;
+    srint_t size          = wanted_size;
     size += align;
     size += preamble_size;
 
@@ -608,7 +613,7 @@ static sr_result_t
 sralloc_proxy_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
     SRALLOC_UNUSED( allocator );
     srint_t preamble_size = sizeof( sralloc_proxy_preamble_t );
-    srint_t size = wanted_size;
+    srint_t size          = wanted_size;
     size += align;
     size += preamble_size;
 
