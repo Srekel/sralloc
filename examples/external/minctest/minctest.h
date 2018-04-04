@@ -24,6 +24,12 @@
  *
  */
 
+ /* 
+  * SRALLOC NOTE: I have made minor changes to this file to better suit the unit
+  * tests for sralloc. 
+  * /Anders Elfgren
+ */
+
 
 
 /*
@@ -92,7 +98,7 @@ static int lfails = 0;
     const int ts = ltests;\
     const int fs = lfails;\
     const clock_t start = clock();\
-    printf("\t%-20s", name);\
+    printf("\t%-30s", name);\
     test();\
     printf("pass:%2d   fail:%2d   %4dms\n",\
             (ltests-ts)-(lfails-fs), lfails-fs,\

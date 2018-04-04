@@ -2,9 +2,11 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ClCompile Include="unittest.c" />
+    <ClCompile Include="..\external\ig_debugheap\DebugHeap.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\sralloc.h" />
     <ClInclude Include="..\external\minctest\minctest.h" />
+    <ClInclude Include="..\external\ig_debugheap\DebugHeap.h" />
   </ItemGroup>
 </Project>

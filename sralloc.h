@@ -74,6 +74,16 @@ SRALLOC_API srallocator_t* sralloc_create_end_of_page_allocator( const char*    
                                                                  srallocator_t* parent );
 SRALLOC_API void           sralloc_destroy_end_of_page_allocator( srallocator_t* allocator );
 
+#ifdef SRALLOC_ENABLE_IG_DEBUGHEAP
+// Insomniac Games's debug heap allocator (for lots of things)
+// See its github page. sralloc assumes that it's .h-file has been included
+// prior to including sralloc.h for the implementation
+// https://github.com/deplinenoise/ig-debugheap
+SRALLOC_API      srallocator_t*
+                 sralloc_create_ig_debugheap_allocator( const char* name, srallocator_t* parent, sruint_t capacity );
+SRALLOC_API void sralloc_destroy_ig_debugheap_allocator( srallocator_t* allocator );
+#endif
+
 // Slot allocator (for things of same size)
 SRALLOC_API srallocator_t* sralloc_create_slot_allocator( srallocator_t* parent,
                                                           const char*    name,
@@ -802,6 +812,101 @@ sralloc_destroy_end_of_page_allocator( srallocator_t* allocator ) {
       (srallocator_end_of_page_t*)( allocator + 1 );
     SRALLOC_DEALLOC( end_of_page_allocator->backing_allocator, allocator );
 }
+
+    // ██╗ ██████╗         ██████╗ ███████╗██████╗ ██╗   ██╗ ██████╗ ██╗  ██╗███████╗ █████╗ ██████╗
+    // ██║██╔════╝         ██╔══██╗██╔════╝██╔══██╗██║   ██║██╔════╝ ██║ ██║██╔════╝██╔══██╗██╔══██╗
+    // ██║██║  ███╗        ██║  ██║█████╗  ██████╔╝██║   ██║██║  ███╗███████║█████╗ ███████║██████╔╝
+    // ██║██║   ██║        ██║  ██║██╔══╝  ██╔══██╗██║   ██║██║   ██║██╔══██║██╔══╝  ██╔══██║██╔═══╝
+    // ██║╚██████╔╝███████╗██████╔╝███████╗██████╔╝╚██████╔╝╚██████╔╝██║  ██║███████╗██║  ██║██║
+    // ╚═╝ ╚═════╝ ╚══════╝╚═════╝ ╚══════╝╚═════╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝
+
+#ifdef SRALLOC_ENABLE_IG_DEBUGHEAP
+
+typedef struct {
+    DebugHeap* debugheap;
+} srallocator_ig_debugheap_t;
+
+typedef struct {
+    srint_t     size;
+    srint_t     offset;
+    srmemflag_t initial_protection;
+    srchar_t*   page_ptr;
+} sralloc_ig_debugheap_preamble_t;
+
+static sr_result_t
+sralloc_ig_debugheap_allocate( srallocator_t* allocator, srint_t wanted_size, srint_t align ) {
+    srallocator_ig_debugheap_t* ig_debugheap_allocator =
+      (srallocator_ig_debugheap_t*)( allocator + 1 );
+
+    void* ptr =
+      DebugHeapAllocate( ig_debugheap_allocator->debugheap, (size_t)wanted_size, (size_t)align );
+
+    srint_t actual_size = (srint_t)DebugHeapGetAllocSize( ig_debugheap_allocator->debugheap, ptr );
+
+#ifdef SRALLOC_USE_STATS
+    allocator->stats.amount_allocated += actual_size;
+    allocator->stats.num_allocations += 1;
+#endif
+
+    sr_result_t res;
+    res.ptr  = (void*)ptr;
+    res.size = actual_size;
+    return res;
+}
+
+static void
+sralloc_ig_debugheap_deallocate( srallocator_t* allocator, void* ptr ) {
+    srallocator_ig_debugheap_t* ig_debugheap_allocator =
+      (srallocator_ig_debugheap_t*)( allocator + 1 );
+
+#ifdef SRALLOC_USE_STATS
+    srint_t actual_size = (srint_t)DebugHeapGetAllocSize( ig_debugheap_allocator->debugheap, ptr );
+    allocator->stats.amount_allocated -= actual_size;
+    allocator->stats.num_allocations -= 1;
+#endif
+
+    DebugHeapFree( ig_debugheap_allocator->debugheap, ptr );
+}
+
+SRALLOC_API srallocator_t*
+            sralloc_create_ig_debugheap_allocator( const char*    name,
+                                                   srallocator_t* parent,
+                                                   sruint_t       capacity ) {
+    DebugHeap* debugheap = DebugHeapInit( (size_t)capacity );
+
+    srint_t        allocator_size = sizeof( srallocator_t ) + sizeof( srallocator_ig_debugheap_t );
+    void*          memory    = DebugHeapAllocate( debugheap, allocator_size, 64u );
+    srallocator_t* allocator = (srallocator_t*)memory;
+    srallocator_ig_debugheap_t* ig_debugheap_allocator =
+      (srallocator_ig_debugheap_t*)( allocator + 1 );
+
+    SRALLOC_memset( allocator, 0, allocator_size );
+    sr__add_child_allocator( parent, allocator );
+    sr__set_name( allocator, name );
+    allocator->allocate_func          = sralloc_ig_debugheap_allocate;
+    allocator->deallocate_func        = sralloc_ig_debugheap_deallocate;
+    ig_debugheap_allocator->debugheap = debugheap;
+
+    return allocator;
+}
+
+SRALLOC_API void
+sralloc_destroy_ig_debugheap_allocator( srallocator_t* allocator ) {
+#ifdef SRALLOC_USE_STATS
+    sr__remove_child_allocator( allocator->parent, allocator );
+    SRALLOC_assert( allocator->num_children == 0 );
+    SRALLOC_assert( allocator->stats.num_allocations == 0 );
+    SRALLOC_assert( allocator->stats.amount_allocated == 0 );
+#endif
+    srallocator_ig_debugheap_t* ig_debugheap_allocator =
+      (srallocator_ig_debugheap_t*)( allocator + 1 );
+
+    DebugHeap* debugheap = ig_debugheap_allocator->debugheap;
+    DebugHeapFree( ig_debugheap_allocator->debugheap, allocator );
+    DebugHeapDestroy( debugheap );
+}
+
+#endif //  SRALLOC_ENABLE_IG_DEBUGHEAP
 
 /*
 

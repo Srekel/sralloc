@@ -158,9 +158,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\external\ig_debugheap\DebugHeap.c" />
     <ClCompile Include="unittest.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\external\ig_debugheap\DebugHeap.h" />
     <ClInclude Include="..\external\minctest\minctest.h" />
     <ClInclude Include="..\sralloc.h" />
   </ItemGroup>

@@ -6,7 +6,17 @@
 #pragma warning( pop )
 #endif
 
+#ifdef _MSC_VER
+#pragma warning( push )
+#pragma warning( disable : 4464 4820 )
+#endif
+#include "../external/ig_debugheap/DebugHeap.h"
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
+
 #define SRALLOC_IMPLEMENTATION
+#define SRALLOC_ENABLE_IG_DEBUGHEAP
 // #define SRALLOC_DISABLE_NAMES
 // #define SRALLOC_DISABLE_STATS
 #ifdef _MSC_VER
@@ -34,7 +44,6 @@
 sr_result_t
 unittest_alloc( srallocator_t* allocator, int size ) {
     sr_result_t res = sralloc_alloc_with_size( allocator, size );
-    lequal( res.size, size ); // Not necessarily true but for now
     memset( res.ptr, ( ( (sruintptr_t)res.ptr ) & 0xFF0 ) >> 8, res.size );
     return res;
 }
@@ -188,6 +197,28 @@ end_of_page_test( void ) {
     sralloc_destroy_malloc_allocator( mallocalloc );
 }
 
+void
+ig_debugheap_test( void ) {
+    srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
+    srallocator_t* igdbgalloc =
+      sralloc_create_ig_debugheap_allocator( "igdebugheap", mallocalloc, 2 * 1024 * 1024 );
+    //generic_allocator_tests( igdbgalloc );
+    sr_result_t pA1                    = unittest_alloc( igdbgalloc, 100 );
+    // sr_result_t pA2                    = sralloc_alloc_aligned_with_size( igdbgalloc, 100, 64 );
+    // *( ( (char*)pA1.ptr ) + 101 ) = 1;
+    // *( ( (char*)pA2.ptr ) + 101 ) = 1;
+    // for ( int i = 0; i < 1000; ++i ) {
+    //     char c = pA1[i];
+    //     pA1[i] = c + 1;
+    // }
+    unittest_dealloc( igdbgalloc, pA1 );
+    // unittest_dealloc( igdbgalloc, pA2 );
+    sralloc_destroy_ig_debugheap_allocator( igdbgalloc );
+    lequal( mallocalloc->stats.num_allocations, 0 );
+    lequal( mallocalloc->stats.amount_allocated, 0 );
+    sralloc_destroy_malloc_allocator( mallocalloc );
+}
+
 int
 main( void ) {
 
@@ -195,6 +226,7 @@ main( void ) {
     lrun( "stack_allocator", stack_test );
     lrun( "proxy_allocator", proxy_test );
     lrun( "end_of_page_allocator", end_of_page_test );
+    lrun( "ig_debugheap_allocator", ig_debugheap_test );
 
     lresults();
 
