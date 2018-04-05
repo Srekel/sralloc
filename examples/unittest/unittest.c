@@ -1,11 +1,16 @@
 
 #ifdef _WIN32
+#ifdef _MSC_VER
 #pragma warning( push, 0 )
+#endif
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+#ifdef _MSC_VER
 #pragma warning( pop )
 #endif
+#endif
 
+#ifndef NO_IGDEBUG
 #ifdef _MSC_VER
 #pragma warning( push )
 #pragma warning( disable : 4464 4820 )
@@ -14,9 +19,10 @@
 #ifdef _MSC_VER
 #pragma warning( pop )
 #endif
+#define SRALLOC_ENABLE_IG_DEBUGHEAP
+#endif // NO_IGDEBUG
 
 #define SRALLOC_IMPLEMENTATION
-#define SRALLOC_ENABLE_IG_DEBUGHEAP
 // #define SRALLOC_DISABLE_NAMES
 // #define SRALLOC_DISABLE_STATS
 #ifdef _MSC_VER
@@ -197,13 +203,14 @@ end_of_page_test( void ) {
     sralloc_destroy_malloc_allocator( mallocalloc );
 }
 
+#ifndef NO_IGDEBUG
 void
 ig_debugheap_test( void ) {
     srallocator_t* mallocalloc = sralloc_create_malloc_allocator( "root" );
     srallocator_t* igdbgalloc =
       sralloc_create_ig_debugheap_allocator( "igdebugheap", mallocalloc, 2 * 1024 * 1024 );
-    //generic_allocator_tests( igdbgalloc );
-    sr_result_t pA1                    = unittest_alloc( igdbgalloc, 100 );
+    // generic_allocator_tests( igdbgalloc );
+    sr_result_t pA1 = unittest_alloc( igdbgalloc, 100 );
     // sr_result_t pA2                    = sralloc_alloc_aligned_with_size( igdbgalloc, 100, 64 );
     // *( ( (char*)pA1.ptr ) + 101 ) = 1;
     // *( ( (char*)pA2.ptr ) + 101 ) = 1;
@@ -218,6 +225,7 @@ ig_debugheap_test( void ) {
     lequal( mallocalloc->stats.amount_allocated, 0 );
     sralloc_destroy_malloc_allocator( mallocalloc );
 }
+#endif
 
 int
 main( void ) {
@@ -226,7 +234,10 @@ main( void ) {
     lrun( "stack_allocator", stack_test );
     lrun( "proxy_allocator", proxy_test );
     lrun( "end_of_page_allocator", end_of_page_test );
+
+#ifndef NO_IGDEBUG
     lrun( "ig_debugheap_allocator", ig_debugheap_test );
+#endif
 
     lresults();
 
