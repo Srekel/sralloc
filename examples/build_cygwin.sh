@@ -1,0 +1,2 @@
+# make all EXTRA_DEFINES="-D_WIN32 -DNO_IGDEBUG"
+make all EXTRA_DEFINES="-D_WIN32"
